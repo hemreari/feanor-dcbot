@@ -2,17 +2,22 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	//"os/signal"
 	"strings"
 	//"syscall"
 	"time"
 
+	"./config"
 	"./spotify"
+	"./storage"
+
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -43,19 +48,45 @@ var buffer = make([][]byte, 0)
 
 func main() {
 	readConfig(&cfg, "config.json")
+
+	mySQLClient, err := storage.NewStorageClient(&cfg)
+	if err != nil {
+		log.Println(err)
+	}
+
 	clientID := cfg.Spotify.ClientID
 	clientSecretID := cfg.Spotify.ClientSecretID
+
 	spotifyAPI := spotify.NewSpotifyAPI(clientID, clientSecretID)
-	token := spotifyAPI.GetAPIToken()
 
-	spotifyPl := spotifyAPI.GetTrackFromPlaylist(token.AccessToken, "playlistid")
-
-	items := spotifyPl.Tracks.Items
-
-	for index := range items {
-		log.Println(items[index].Track.Name)
+	token, err := spotifyAPI.GetAPIToken()
+	if err != nil {
+		log.Println(err)
 	}
-	//log.Println(Tracks.Track)
+
+	playlistID := cfg.PlaylistID.MakamIstirasi
+	spotifyPl, err := spotifyAPI.GetTrackFromPlaylist(token.AccessToken, playlistID)
+	if err != nil {
+		log.Println(err)
+	}
+
+	items := spotifyPl.Items
+	for index := range items {
+		trackName := items[index].Track.Name
+		log.Println(trackName)
+
+		artistsName := ""
+		artists := items[index].Track.Artists
+		for artistIndex := range artists {
+			artistsName += artists[artistIndex].Name
+		}
+		log.Println(artistsName)
+
+		err = mySQLClient.InsertTrackArtist(artistsName, trackName)
+		if err != nil {
+			log.Println(err)
+		}
+	}
 
 	/*
 		if token == "" {

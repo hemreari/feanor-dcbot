@@ -3,6 +3,9 @@
 		"clientID": "clientid",
 		"clientSecretID": "clientSecretID"
 	},
+	"youtube": {
+		"apiKey": "apikey"
+	},
 	"discord": {
 		"token": "discordtoken"
 	},

@@ -1,23 +1,38 @@
-package Config
+package config
 
 type Config struct {
-	Spotify SpotifyConfig `json:"spotify"`
-	Discord DiscordConfig `json:"discord"`
-	MySQL   MySQLConfig   `json:"mysql"`
+	Spotify    SpotifyConfig    `json:"spotify"`
+	Youtube    YoutubeConfig    `json:"youtube"`
+	Discord    DiscordConfig    `json:"discord"`
+	MySQL      MySQLConfig      `json:"mysql"`
+	PlaylistID PlaylistIDConfig `json:"playlistIDs"`
 }
 
 type SpotifyConfig struct {
-	ClientID       string `json"clientID"`
+	ClientID       string `json:"clientID"`
 	ClientSecretID string `json:"clientSecretID"`
 }
 
-type Discord struct {
+type YoutubeConfig struct {
+	ClientID       string `json:"clientID"`
+	ClientSecretID string `json:"clientSecretID"`
+}
+
+type DiscordConfig struct {
 	Token string `json:"token"`
 }
 
-type MySQL struct {
+type MySQLConfig struct {
 	UserName string `json:"userName"`
 	Password string `json:"password"`
 	Host     string `json:"host"`
 	DBName   string `json:"dbName"`
+	Driver   string `json:"driver"`
+}
+
+type PlaylistIDConfig struct {
+	MusicOfAinur  string `json:"musicOfAinur"`
+	Erebor        string `json:"erebor"`
+	Mordor        string `json:"mordor"`
+	MakamIstirasi string `json:"makamIstirasi"`
 }

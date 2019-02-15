@@ -3,8 +3,7 @@ package spotify
 import (
 	"context"
 	"encoding/json"
-	"io/ioutil"
-	"log"
+	//"io/ioutil"
 	"net/http"
 
 	"golang.org/x/oauth2"
@@ -16,27 +15,26 @@ type SpotifyAPI struct {
 	ClientSecretID string
 }
 
-type SpotifyAccessToken struct {
-	AccessToken string
-}
-
 type SpotifyPlaylist struct {
-	Name   string `json:"name"`
-	Tracks struct {
-		Items []struct {
-			Track struct {
+	Items []struct {
+		Track struct {
+			Album struct {
 				Artists []struct {
 					Name string `json:"name"`
 				} `json:"artists"`
 				Name string `json:"name"`
-			} `json:"track"`
-		} `json:"items"`
-		Limit    int         `json:"limit"`
-		Next     string      `json:"next"`
-		Offset   int         `json:"offset"`
-		Previous interface{} `json:"previous"`
-		Total    int         `json:"total"`
-	} `json:"tracks"`
+			} `json:"album"`
+			Artists []struct {
+				Name string `json:"name"`
+			} `json:"artists"`
+			Name string `json:"name"`
+		} `json:"track"`
+	} `json:"items"`
+	Limit    int         `json:"limit"`
+	Next     string      `json:"next"`
+	Offset   int         `json:"offset"`
+	Previous interface{} `json:"previous"`
+	Total    int         `json:"total"`
 }
 
 func NewSpotifyAPI(clientID, clientSecretID string) *SpotifyAPI {
@@ -46,7 +44,7 @@ func NewSpotifyAPI(clientID, clientSecretID string) *SpotifyAPI {
 	}
 }
 
-func (s *SpotifyAPI) GetAPIToken() *oauth2.Token {
+func (s *SpotifyAPI) GetAPIToken() (*oauth2.Token, error) {
 	ctx := context.Background()
 	conf := &clientcredentials.Config{
 		ClientID:     s.ClientID,
@@ -56,12 +54,12 @@ func (s *SpotifyAPI) GetAPIToken() *oauth2.Token {
 
 	tok, err := conf.Token(ctx)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
-	return tok
+	return tok, nil
 }
 
-func (s *SpotifyAPI) GetTrackFromPlaylist(token, playlistID string) SpotifyPlaylist {
+func (s *SpotifyAPI) GetTrackFromPlaylist(token, playlistID string) (*SpotifyPlaylist, error) {
 	url := "https://api.spotify.com/v1/playlists/" + playlistID + "/tracks"
 	bearerToken := "Bearer " + token
 
@@ -71,18 +69,16 @@ func (s *SpotifyAPI) GetTrackFromPlaylist(token, playlistID string) SpotifyPlayl
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	/*
-		fmt.Println(string([]byte(body)))
-	*/
 	// spotify playlist
-	body, _ := ioutil.ReadAll(resp.Body)
+	decoder := json.NewDecoder(resp.Body)
 	var spotifyPl SpotifyPlaylist
-	err = json.Unmarshal([]byte(body), &spotifyPl)
+	err = decoder.Decode(&spotifyPl)
 	if err != nil {
-		log.Println(err)
+		return nil, err
 	}
-	return spotifyPl
+
+	return &spotifyPl, nil
 }
