@@ -11,5 +11,9 @@
 		"password": "dbpassword",
 		"host": "dbhost",
 		"dbName": "dbname"
+	},
+	"spotifyPlaylistIDs": {
+		"alias": "playlistid",
+		"alias2": "playlistid"
 	}
 }
