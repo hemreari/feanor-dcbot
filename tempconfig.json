@@ -1,0 +1,15 @@
+{
+	"spotify": {
+		"clientID": "clientid",
+		"clientSecretID": "clientSecretID"
+	},
+	"discord": {
+		"token": "discordtoken"
+	},
+	"mysql": {
+		"userName": "dbusername",
+		"password": "dbpassword",
+		"host": "dbhost",
+		"dbName": "dbname"
+	}
+}
