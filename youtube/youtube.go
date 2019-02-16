@@ -23,7 +23,7 @@ func NewYoutubeAPI(developerKey string) *YoutubeAPI {
 	}
 }
 
-func (y *YoutubeAPI) YoutubeSearch(query string) {
+func (y *YoutubeAPI) Search(query string) {
 	developerKey = y.DeveloperKey
 
 	client := &http.Client{
