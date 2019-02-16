@@ -16,6 +16,7 @@ type SpotifyConfig struct {
 type YoutubeConfig struct {
 	ClientID       string `json:"clientID"`
 	ClientSecretID string `json:"clientSecretID"`
+	ApiKey         string `json:"apiKey"`
 }
 
 type DiscordConfig struct {
