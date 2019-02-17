@@ -1,13 +1,13 @@
 package youtube
 
 import (
-	"context"
-	"encoding/json"
 	//"io/ioutil"
+	"fmt"
+	"log"
 	"net/http"
 
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/clientcredentials"
+	//"golang.org/x/oauth2"
+	//"golang.org/x/oauth2/clientcredentials"
 
 	"google.golang.org/api/googleapi/transport"
 	"google.golang.org/api/youtube/v3"
@@ -23,8 +23,8 @@ func NewYoutubeAPI(developerKey string) *YoutubeAPI {
 	}
 }
 
-func (y *YoutubeAPI) Search(query string) {
-	developerKey = y.DeveloperKey
+func (y *YoutubeAPI) Search(query string) string {
+	developerKey := y.DeveloperKey
 
 	client := &http.Client{
 		Transport: &transport.APIKey{Key: developerKey},
@@ -37,33 +37,36 @@ func (y *YoutubeAPI) Search(query string) {
 
 	// Make the API call to YouTube.
 	call := service.Search.List("id,snippet").
-		Q(*query).
-		MaxResults(*maxResults)
+		Q(query).
+		MaxResults(1)
 	response, err := call.Do()
 	if err != nil {
 		log.Println(err)
 	}
 
 	// Group video, channel, and playlist results in separate lists.
-	videos := make(map[string]string)
-	channels := make(map[string]string)
-	playlists := make(map[string]string)
+	//videos := make(map[string]string)
+	//channels := make(map[string]string)
+	//playlists := make(map[string]string)
 
 	// Iterate through each item and add it to the correct list.
 	for _, item := range response.Items {
 		switch item.Id.Kind {
 		case "youtube#video":
-			videos[item.Id.VideoId] = item.Snippet.Title
-		case "youtube#channel":
-			channels[item.Id.ChannelId] = item.Snippet.Title
-		case "youtube#playlist":
-			playlists[item.Id.PlaylistId] = item.Snippet.Title
+			return item.Id.VideoId
+			//videos[item.Id.VideoId] = item.Snippet.Title
+		default:
+			return ""
 		}
 	}
 
-	printIDs("Videos", videos)
-	printIDs("Channels", channels)
-	printIDs("Playlists", playlists)
+	return ""
+
+	/*
+		printIDs("Videos", videos)
+		printIDs("Channels", channels)
+		printIDs("Playlists", playlists)
+	*/
 }
 
 // Print the ID and title of each result in a list as well as a name that

@@ -17,6 +17,7 @@ import (
 	"./config"
 	"./spotify"
 	"./storage"
+	"./youtube"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -59,6 +60,8 @@ func main() {
 
 	spotifyAPI := spotify.NewSpotifyAPI(clientID, clientSecretID)
 
+	youtubeAPI := youtube.NewYoutubeAPI(cfg.Youtube.ApiKey)
+
 	token, err := spotifyAPI.GetAPIToken()
 	if err != nil {
 		log.Println(err)
@@ -82,7 +85,10 @@ func main() {
 		}
 		log.Println(artistsName)
 
-		err = mySQLClient.InsertTrackArtist(artistsName, trackName)
+		youtubeQueryStr := artistsName + trackName
+		youtubeID := youtubeAPI.Search(youtubeQueryStr)
+
+		err = mySQLClient.InsertTrackArtistTubeID(artistsName, trackName, youtubeID)
 		if err != nil {
 			log.Println(err)
 		}
