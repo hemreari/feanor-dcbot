@@ -1,5 +1,4 @@
-*.jpg
-*.dca
+botstuffs/
 *.exe
 *testjson.json
 *.mp3
