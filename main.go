@@ -8,9 +8,9 @@ import (
 	"io"
 	"log"
 	"os"
-	"path/filepath"
 	//"os/signal"
-	"strings"
+	"path/filepath"
+	//"strings"
 	//"syscall"
 	"time"
 
@@ -40,11 +40,11 @@ func readConfig(cfg *config.Config, configFileName string) {
 }
 
 func init() {
-	flag.StringVar(&token, "t", "", "Bot Token")
+	flag.StringVar(&dcToken, "t", "", "Bot Token")
 	flag.Parse()
 }
 
-var token string
+var dcToken string
 var buffer = make([][]byte, 0)
 
 func main() {
@@ -59,7 +59,6 @@ func main() {
 	clientSecretID := cfg.Spotify.ClientSecretID
 
 	spotifyAPI := spotify.NewSpotifyAPI(clientID, clientSecretID)
-
 	youtubeAPI := youtube.NewYoutubeAPI(cfg.Youtube.ApiKey)
 
 	token, err := spotifyAPI.GetAPIToken()
@@ -83,7 +82,16 @@ func main() {
 		for artistIndex := range artists {
 			artistsName += artists[artistIndex].Name
 		}
-		log.Println(artistsName)
+
+		existsQuery := "SELECT exists(SELECT ID FROM music WHERE spotify_artist_name=\"" + artistsName + "\")"
+		exists, err := mySQLClient.RowExists(existsQuery)
+		if err != nil {
+			log.Println(err)
+		}
+		if exists {
+			log.Println("found entry in database.")
+			continue
+		}
 
 		youtubeQueryStr := artistsName + trackName
 		youtubeID := youtubeAPI.Search(youtubeQueryStr)
@@ -94,23 +102,23 @@ func main() {
 		}
 	}
 
-	/*
-		if token == "" {
-			fmt.Println("No token provided. Please run: airhorn -t <bot token>")
-			return
-		}
+	if dcToken == "" {
+		fmt.Println("No token provided. Please run: airhorn -t <bot token>")
+		return
+	}
 
-		/* Load the sound file.
-		err := loadSound()
-		if err != nil {
-			fmt.Println("Error loading sound: ", err)
-			fmt.Println("Please copy $GOPATH/src/github.com/bwmarrin/examples/airhorn/airhorn.dca to this directory.")
-			return
-		}*/
+	/* Load the sound file.
+	err := loadSound()
+	if err != nil {
+		fmt.Println("Error loading sound: ", err)
+		fmt.Println("Please copy $GOPATH/src/github.com/bwmarrin/examples/airhorn/airhorn.dca to this directory.")
+		return
+	}*/
 
 	/*
+
 		// Create a new Discord session using the provided bot token.
-		dg, err := discordgo.New("Bot " + token)
+		dg, err := discordgo.New("Bot " + dcToken)
 		if err != nil {
 			fmt.Println("Error creating Discord session: ", err)
 			return
@@ -138,8 +146,7 @@ func main() {
 		<-sc
 
 		// Cleanly close down the Discord session.
-		dg.Close()
-	*/
+		dg.Close() */
 }
 
 // This function will be called (due to AddHandler above) when the bot receives
@@ -150,6 +157,7 @@ func ready(s *discordgo.Session, event *discordgo.Ready) {
 	s.UpdateStatus(0, "!airhorn")
 }
 
+/*
 // This function will be called (due to AddHandler above) every time a new
 // message is created on any channel that the autenticated bot has access to.
 func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -162,6 +170,11 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	if strings.Contains(m.Content, "secret word") {
 		s.ChannelMessageSend(m.ChannelID, "dont use that word")
+	}
+
+	if strings.Contains(m.Content, "playmusic") {
+		serverID := m.ChannelID.GuildID
+		go CreateVoiceInstance("https://www.youtube.com/watch?v=9U2CSiklIpo", serverID)
 	}
 
 	// check if the message is "!airhorn"
@@ -193,7 +206,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			}
 		}
 	}
-}
+}*/
 
 // This function will be called (due to AddHandler above) every time a new
 // guild is joined.
