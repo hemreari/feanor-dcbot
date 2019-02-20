@@ -37,7 +37,7 @@ func (s *StorageClient) InsertTrackArtistTubeID(artistName, trackName, youtubeID
 func (s *StorageClient) RowExists(query string) (bool, error) {
 	var exists bool
 
-	s.Client.QueryRow(query).Scan(&exists)
+	err := s.Client.QueryRow(query).Scan(&exists)
 	if err != nil && err != sql.ErrNoRows {
 		return false, err
 	}
