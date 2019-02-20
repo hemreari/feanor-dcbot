@@ -15,8 +15,11 @@
 		"host": "dbhost",
 		"dbName": "dbname"
 	},
-	"spotifyPlaylistIDs": {
+	"playlistIDs": {
 		"alias": "playlistid",
 		"alias2": "playlistid"
+	},
+	"musicDirectory": {
+		"downloadPath": "path to where download videos"
 	}
 }

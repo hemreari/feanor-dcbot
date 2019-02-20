@@ -6,6 +6,7 @@ type Config struct {
 	Discord    DiscordConfig    `json:"discord"`
 	MySQL      MySQLConfig      `json:"mysql"`
 	PlaylistID PlaylistIDConfig `json:"playlistIDs"`
+	MusicDir   MusicDirectory   `json:"musicDirectory"`
 }
 
 type SpotifyConfig struct {
@@ -36,4 +37,8 @@ type PlaylistIDConfig struct {
 	Erebor        string `json:"erebor"`
 	Mordor        string `json:"mordor"`
 	MakamIstirasi string `json:"makamIstirasi"`
+}
+
+type MusicDirectory struct {
+	DownloadPath string `json"downlaodPath"`
 }
