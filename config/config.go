@@ -37,6 +37,7 @@ type PlaylistIDConfig struct {
 	Erebor        string `json:"erebor"`
 	Mordor        string `json:"mordor"`
 	MakamIstirasi string `json:"makamIstirasi"`
+	Shame         string `json:"shame"`
 }
 
 type MusicDirectory struct {

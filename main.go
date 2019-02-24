@@ -1,24 +1,28 @@
 package main
 
 import (
-	"encoding/binary"
+	//"encoding/binary"
 	"encoding/json"
-	"flag"
+	//"flag"
 	"fmt"
-	"io"
+	"io/ioutil"
 	"log"
+	//"math/big"
 	"os"
-	//"os/signal"
+	"os/signal"
 	"path/filepath"
+	"strings"
 	//"strings"
-	//"syscall"
+	"syscall"
 	"time"
 
+	"./audio"
 	"./config"
 	"./spotify"
 	"./storage"
 	"./youtube"
 
+	"github.com/bwmarrin/dgvoice"
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -39,12 +43,6 @@ func readConfig(cfg *config.Config, configFileName string) {
 	}
 }
 
-func init() {
-	flag.StringVar(&dcToken, "t", "", "Bot Token")
-	flag.Parse()
-}
-
-var dcToken string
 var buffer = make([][]byte, 0)
 
 func main() {
@@ -66,7 +64,7 @@ func main() {
 		log.Println(err)
 	}
 
-	playlistID := cfg.PlaylistID.MakamIstirasi
+	playlistID := cfg.PlaylistID.Shame
 	spotifyPl, err := spotifyAPI.GetTrackFromPlaylist(token.AccessToken, playlistID)
 	if err != nil {
 		log.Println(err)
@@ -75,21 +73,19 @@ func main() {
 	items := spotifyPl.Items
 	for index := range items {
 		trackName := items[index].Track.Name
-		log.Println(trackName)
 
 		artistsName := ""
 		artists := items[index].Track.Artists
 		for artistIndex := range artists {
 			artistsName += artists[artistIndex].Name
 		}
-
+		log.Println(artistsName)
 		existsQuery := "SELECT exists(SELECT ID FROM music WHERE spotify_artist_name=\"" + artistsName + "\")"
 		exists, err := mySQLClient.RowExists(existsQuery)
 		if err != nil {
 			log.Println(err)
 		}
 		if exists {
-			log.Println("found entry in database.")
 			continue
 		}
 
@@ -102,51 +98,88 @@ func main() {
 		}
 	}
 
-	if dcToken == "" {
-		fmt.Println("No token provided. Please run: airhorn -t <bot token>")
+	// get youtube video id's from db
+	var ytDbId string
+	rows, err := mySQLClient.Client.Query("SELECT youtube_url FROM music")
+	if err != nil {
+		log.Println(err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		err = rows.Scan(&ytDbId)
+		if err != nil {
+			log.Println(err)
+		}
+		//download the video
+		youtubeURL := "https://ww.youtube.com/watch?v=" + ytDbId
+
+		downloadPathMP4, err := audio.DownloadYTVideo(youtubeURL, &cfg)
+		log.Println(downloadPathMP4)
+		if err != nil {
+			log.Println(err)
+		}
+		// convert mp4 file to mp3 file
+		downloadPathMP3 := strings.TrimSuffix(downloadPathMP4, ".mp4") + ".mp3"
+		_, err = audio.ConvertMP4ToMp3(downloadPathMP4, downloadPathMP3)
+		if err != nil {
+			log.Println(err)
+		}
+
+		// convert mp3 file to dca
+		dcaPath := strings.TrimSuffix(downloadPathMP3, ".mp3") + ".dca"
+		err = audio.ConvertMP3ToDCA(downloadPathMP3, dcaPath)
+		if err != nil {
+			log.Println(err)
+		}
+		log.Println(dcaPath)
+	}
+
+	/*
+		if dcToken == "" {
+			fmt.Println("No token provided. Please run: airhorn -t <bot token>")
+			return
+		}*/
+
+	/*
+		//Load the sound file.
+		err = loadSound()
+		if err != nil {
+			fmt.Println("Error loading sound: ", err)
+			fmt.Println("Please copy $GOPATH/src/github.com/bwmarrin/examples/airhorn/airhorn.dca to this directory.")
+			return
+		}*/
+
+	// Create a new Discord session using the provided bot token.
+	dg, err := discordgo.New("Bot " + cfg.Discord.Token)
+	if err != nil {
+		fmt.Println("Error creating Discord session: ", err)
 		return
 	}
 
-	/* Load the sound file.
-	err := loadSound()
+	// Register ready as a callback for the ready events.
+	dg.AddHandler(ready)
+
+	// Register messageCreate as a callback for the messageCreate events.
+	dg.AddHandler(messageCreate)
+
+	// Register guildCreate as a callback for the guildCreate events.
+	dg.AddHandler(guildCreate)
+
+	// Open the websocket and begin listening.
+	err = dg.Open()
 	if err != nil {
-		fmt.Println("Error loading sound: ", err)
-		fmt.Println("Please copy $GOPATH/src/github.com/bwmarrin/examples/airhorn/airhorn.dca to this directory.")
-		return
-	}*/
+		fmt.Println("Error opening Discord session: ", err)
+	}
 
-	/*
+	// Wait here until CTRL-C or other term signal is received.
+	fmt.Println("Airhorn is now running.  Press CTRL-C to exit.")
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
+	<-sc
 
-		// Create a new Discord session using the provided bot token.
-		dg, err := discordgo.New("Bot " + dcToken)
-		if err != nil {
-			fmt.Println("Error creating Discord session: ", err)
-			return
-		}
-
-		// Register ready as a callback for the ready events.
-		dg.AddHandler(ready)
-
-		// Register messageCreate as a callback for the messageCreate events.
-		dg.AddHandler(messageCreate)
-
-		// Register guildCreate as a callback for the guildCreate events.
-		dg.AddHandler(guildCreate)
-
-		// Open the websocket and begin listening.
-		err = dg.Open()
-		if err != nil {
-			fmt.Println("Error opening Discord session: ", err)
-		}
-
-		// Wait here until CTRL-C or other term signal is received.
-		fmt.Println("Airhorn is now running.  Press CTRL-C to exit.")
-		sc := make(chan os.Signal, 1)
-		signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
-		<-sc
-
-		// Cleanly close down the Discord session.
-		dg.Close() */
+	// Cleanly close down the Discord session.
+	dg.Close()
 }
 
 // This function will be called (due to AddHandler above) when the bot receives
@@ -157,7 +190,6 @@ func ready(s *discordgo.Session, event *discordgo.Ready) {
 	s.UpdateStatus(0, "!airhorn")
 }
 
-/*
 // This function will be called (due to AddHandler above) every time a new
 // message is created on any channel that the autenticated bot has access to.
 func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -173,8 +205,8 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	if strings.Contains(m.Content, "playmusic") {
-		serverID := m.ChannelID.GuildID
-		go CreateVoiceInstance("https://www.youtube.com/watch?v=9U2CSiklIpo", serverID)
+		//serverID := m.ChannelID.GuildID
+		//go CreateVoiceInstance("https://www.youtube.com/watch?v=9U2CSiklIpo", serverID)
 	}
 
 	// check if the message is "!airhorn"
@@ -206,7 +238,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			}
 		}
 	}
-}*/
+}
 
 // This function will be called (due to AddHandler above) every time a new
 // guild is joined.
@@ -225,20 +257,25 @@ func guildCreate(s *discordgo.Session, event *discordgo.GuildCreate) {
 	}
 }
 
+/*
+
 // loadSound attempts to load an encoded sound file from disk.
 func loadSound() error {
 
-	file, err := os.Open("specialmusic.mp3")
+	file, err := os.Open("musics/FERDİ TAYFUR SEVDİGİM BİRİ VAR DİYEMEDİNMİ.dca")
 	if err != nil {
 		fmt.Println("Error opening dca file :", err)
 		return err
 	}
 
-	var opuslen int16
+	var opuslen uint64
 
 	for {
 		// Read opus frame length from dca file.
 		err = binary.Read(file, binary.LittleEndian, &opuslen)
+		if err != nil {
+			log.Println(err)
+		}
 
 		// If this is the end of the file, just return.
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
@@ -255,8 +292,11 @@ func loadSound() error {
 		}
 
 		// Read encoded pcm from dca file.
-		InBuf := make([]byte, opuslen)
+		InBuf := make([]byte, 960*2)
 		err = binary.Read(file, binary.LittleEndian, &InBuf)
+		if err != nil {
+			log.Println(err)
+		}
 
 		// Should not be any end of file errors
 		if err != nil {
@@ -267,7 +307,7 @@ func loadSound() error {
 		// Append encoded pcm data to the buffer.
 		buffer = append(buffer, InBuf)
 	}
-}
+} */
 
 // playSound plays the current buffer to the provided channel.
 func playSound(s *discordgo.Session, guildID, channelID string) (err error) {
@@ -279,10 +319,18 @@ func playSound(s *discordgo.Session, guildID, channelID string) (err error) {
 	}
 
 	// Sleep for a specified amount of time before playing the sound
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
 	// Start speaking.
 	vc.Speaking(true)
+
+	fmt.Println("Reading Folder: ", "musics/")
+	files, _ := ioutil.ReadDir("musics/")
+	for _, f := range files {
+		fmt.Println("PlayAudioFile:", f.Name())
+		//discord.UpdateStatus(0, f.Name())
+		dgvoice.PlayAudioFile(vc, fmt.Sprintf("%s/%s", "musics/", f.Name()), make(chan bool))
+	}
 
 	// Send the buffer data.
 	for _, buff := range buffer {
