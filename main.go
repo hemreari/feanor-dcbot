@@ -70,6 +70,7 @@ func main() {
 		log.Println(err)
 	}
 
+	// parse the spotify playlist to artist and track name.
 	items := spotifyPl.Items
 	for index := range items {
 		trackName := items[index].Track.Name
@@ -92,7 +93,7 @@ func main() {
 		youtubeQueryStr := artistsName + trackName
 		youtubeID := youtubeAPI.Search(youtubeQueryStr)
 
-		err = mySQLClient.InsertTrackArtistTubeID(artistsName, trackName, youtubeID)
+		err = mySQLClient.InsertTrackData(artistsName, trackName, youtubeID)
 		if err != nil {
 			log.Println(err)
 		}
@@ -114,25 +115,21 @@ func main() {
 		//download the video
 		youtubeURL := "https://ww.youtube.com/watch?v=" + ytDbId
 
-		downloadPathMP4, err := audio.DownloadYTVideo(youtubeURL, &cfg)
-		log.Println(downloadPathMP4)
+		mp3Path, err := audio.DownloadYTVideo(youtubeURL, &cfg)
 		if err != nil {
 			log.Println(err)
 		}
-		// convert mp4 file to mp3 file
-		downloadPathMP3 := strings.TrimSuffix(downloadPathMP4, ".mp4") + ".mp3"
-		_, err = audio.ConvertMP4ToMp3(downloadPathMP4, downloadPathMP3)
+		err = mySQLClient.InsertLocation(mp3Path)
 		if err != nil {
 			log.Println(err)
 		}
-
-		// convert mp3 file to dca
-		dcaPath := strings.TrimSuffix(downloadPathMP3, ".mp3") + ".dca"
-		err = audio.ConvertMP3ToDCA(downloadPathMP3, dcaPath)
-		if err != nil {
-			log.Println(err)
-		}
-		log.Println(dcaPath)
+		/*
+			// convert mp4 file to mp3 file
+			downloadPathMP3 := strings.TrimSuffix(downloadPathMP4, ".mp4") + ".mp3"
+			_, err = audio.ConvertMP4ToMp3(downloadPathMP4, downloadPathMP3)
+			if err != nil {
+				log.Println(err)
+			}*/
 	}
 
 	/*

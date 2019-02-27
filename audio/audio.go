@@ -1,20 +1,21 @@
 package audio
 
 import (
-	"io"
+	//"io"
 	"log"
 	"os"
 	"os/exec"
 	"strings"
 
 	"../config"
-	"github.com/jonas747/dca"
+	//"github.com/jonas747/dca"
 	"github.com/rylio/ytdl"
 )
 
-/* Downloads given youtube url to main directory
+/* Downloads given youtube url to main directory,
+ * converts the downloaded mp4 file to mp3 and return
+ * the mp3 file path or err.
  * using github.com/rylio/ytdl.
- * TODO: add download destination path to config.json
  */
 func DownloadYTVideo(url string, cfg *config.Config) (string, error) {
 	if _, err := os.Stat(cfg.MusicDir.DownloadPath); os.IsNotExist(err) {
@@ -34,7 +35,11 @@ func DownloadYTVideo(url string, cfg *config.Config) (string, error) {
 
 	if _, err := os.Stat(mp3Path); err == nil {
 		log.Printf("%s is already converted to mp3. Skipping\n", videoPath)
-		return videoPath, nil
+		err = os.Remove(videoPath)
+		if err != nil {
+			return "", err
+		}
+		return mp3Path, nil
 	}
 
 	if _, err := os.Stat(videoPath); os.IsNotExist(err) {
@@ -47,11 +52,20 @@ func DownloadYTVideo(url string, cfg *config.Config) (string, error) {
 		log.Println("Video Downloaded: " + videoPath)
 		return videoPath, nil
 	}
-	log.Println("Video Downloaded: " + videoPath)
-	return videoPath, nil
+	log.Printf("Video Downloaded: %s\n", videoPath)
+	log.Printf("Converting to the MP3: %s\n", videoPath)
+
+	mp3Path, err = ConvertMP4ToMp3(videoPath, mp3Path)
+	if err != nil {
+		return "", err
+	}
+	return mp3Path, nil
 }
 
-/* Converts given mp4 file to mp3 file with ffmpeg. */
+/* Converts given mp4 file to mp3 file with ffmpeg.
+ * args:
+ * sourcePath: mp4 file path,
+ * destPath: mp3 file path*/
 func ConvertMP4ToMp3(sourcePath, destPath string) (string, error) {
 	// destination path exists so mp4 file already converted.
 	// skip that file.
@@ -59,12 +73,11 @@ func ConvertMP4ToMp3(sourcePath, destPath string) (string, error) {
 		log.Printf("Didn't converted, %s already exists.\n", sourcePath)
 		if _, err := os.Stat(sourcePath); err == nil {
 			//delete mp4 file
-			delFileCmd := exec.Command("rm", sourcePath)
-			err := delFileCmd.Run()
+			err := os.Remove(sourcePath)
 			if err != nil {
 				return "", err
 			}
-			log.Printf("Deleted %s.\n", sourcePath)
+			log.Printf("Deleted: %s\n", sourcePath)
 			return "", nil
 		}
 		return destPath, nil
@@ -74,11 +87,18 @@ func ConvertMP4ToMp3(sourcePath, destPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	log.Printf("Converted to MP3: %s\n", destPath)
+	err = os.Remove(sourcePath)
+	if err != nil {
+		return "", err
+	}
+	log.Printf("Deleted: %s\n", sourcePath)
 	return destPath, nil
 }
 
+/*
 /* Converts given mp3 file to DCA file using
- * github.com/bwmarrin/dca. */
+ * github.com/bwmarrin/dca.
 func ConvertMP3ToDCA(sourcePath, destPath string) error {
 	if _, err := os.Stat(destPath); err == nil {
 		log.Printf("Didn't converted, %s aldready exists.\n", destPath)
@@ -91,7 +111,7 @@ func ConvertMP3ToDCA(sourcePath, destPath string) error {
 				}
 				return nil
 
-			}*/
+			}
 		return nil
 	}
 
@@ -114,5 +134,4 @@ func ConvertMP3ToDCA(sourcePath, destPath string) error {
 			return err
 		}
 		return nil
-	*/
-}
+} */
