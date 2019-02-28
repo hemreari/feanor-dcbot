@@ -43,10 +43,20 @@ func readConfig(cfg *config.Config, configFileName string) {
 	}
 }
 
+func banner() {
+	b, err := ioutil.ReadFile("asciiart.txt")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(string(b))
+}
+
 var buffer = make([][]byte, 0)
 
 func main() {
+	banner()
 	readConfig(&cfg, "config.json")
+	log.Println("Starting Feanor. Hope everything works well.")
 
 	mySQLClient, err := storage.NewStorageClient(&cfg)
 	if err != nil {
@@ -80,12 +90,11 @@ func main() {
 		for artistIndex := range artists {
 			artistsName += artists[artistIndex].Name
 		}
-		log.Println(artistsName)
+
 		exists, err := mySQLClient.RowExists("spotify_artist_name", artistsName)
 		if err != nil {
 			log.Println(err)
 		}
-		log.Println(exists)
 		if exists {
 			continue
 		}
@@ -93,7 +102,9 @@ func main() {
 		youtubeQueryStr := artistsName + trackName
 		youtubeID := youtubeAPI.Search(youtubeQueryStr)
 
-		err = mySQLClient.InsertTrackData(artistsName, trackName, youtubeID)
+		log.Println(playlistID)
+
+		err = mySQLClient.InsertTrackData(playlistID, artistsName, trackName, youtubeID)
 		if err != nil {
 			log.Println(err)
 		}
@@ -124,29 +135,7 @@ func main() {
 		if err != nil {
 			log.Println(err)
 		}
-		/*
-			// convert mp4 file to mp3 file
-			downloadPathMP3 := strings.TrimSuffix(downloadPathMP4, ".mp4") + ".mp3"
-			_, err = audio.ConvertMP4ToMp3(downloadPathMP4, downloadPathMP3)
-			if err != nil {
-				log.Println(err)
-			}*/
 	}
-
-	/*
-		if dcToken == "" {
-			fmt.Println("No token provided. Please run: airhorn -t <bot token>")
-			return
-		}*/
-
-	/*
-		//Load the sound file.
-		err = loadSound()
-		if err != nil {
-			fmt.Println("Error loading sound: ", err)
-			fmt.Println("Please copy $GOPATH/src/github.com/bwmarrin/examples/airhorn/airhorn.dca to this directory.")
-			return
-		}*/
 
 	// Create a new Discord session using the provided bot token.
 	dg, err := discordgo.New("Bot " + cfg.Discord.Token)
@@ -170,8 +159,6 @@ func main() {
 		fmt.Println("Error opening Discord session: ", err)
 	}
 
-	// Wait here until CTRL-C or other term signal is received.
-	fmt.Println("Airhorn is now running.  Press CTRL-C to exit.")
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
 	<-sc
@@ -196,6 +183,10 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	// This isn't required in this specific example but it's a good practice.
 	if m.Author.ID == s.State.User.ID {
 		return
+	}
+
+	if strings.Contains(m.Content, "!feanor") {
+		// insert user info to db
 	}
 
 	if strings.Contains(m.Content, "secret word") {
@@ -255,58 +246,6 @@ func guildCreate(s *discordgo.Session, event *discordgo.GuildCreate) {
 	}
 }
 
-/*
-
-// loadSound attempts to load an encoded sound file from disk.
-func loadSound() error {
-
-	file, err := os.Open("musics/FERDİ TAYFUR SEVDİGİM BİRİ VAR DİYEMEDİNMİ.dca")
-	if err != nil {
-		fmt.Println("Error opening dca file :", err)
-		return err
-	}
-
-	var opuslen uint64
-
-	for {
-		// Read opus frame length from dca file.
-		err = binary.Read(file, binary.LittleEndian, &opuslen)
-		if err != nil {
-			log.Println(err)
-		}
-
-		// If this is the end of the file, just return.
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			err := file.Close()
-			if err != nil {
-				return err
-			}
-			return nil
-		}
-
-		if err != nil {
-			fmt.Println("Error reading from dca file :", err)
-			return err
-		}
-
-		// Read encoded pcm from dca file.
-		InBuf := make([]byte, 960*2)
-		err = binary.Read(file, binary.LittleEndian, &InBuf)
-		if err != nil {
-			log.Println(err)
-		}
-
-		// Should not be any end of file errors
-		if err != nil {
-			fmt.Println("Error reading from dca file :", err)
-			return err
-		}
-
-		// Append encoded pcm data to the buffer.
-		buffer = append(buffer, InBuf)
-	}
-} */
-
 // playSound plays the current buffer to the provided channel.
 func playSound(s *discordgo.Session, guildID, channelID string) (err error) {
 
@@ -326,7 +265,6 @@ func playSound(s *discordgo.Session, guildID, channelID string) (err error) {
 	files, _ := ioutil.ReadDir("musics/")
 	for _, f := range files {
 		fmt.Println("PlayAudioFile:", f.Name())
-		//discord.UpdateStatus(0, f.Name())
 		dgvoice.PlayAudioFile(vc, fmt.Sprintf("%s/%s", "musics/", f.Name()), make(chan bool))
 	}
 

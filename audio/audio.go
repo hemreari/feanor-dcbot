@@ -48,7 +48,6 @@ func DownloadYTVideo(url string, cfg *config.Config) (string, error) {
 		video.Download(video.Formats[0], file)
 	}
 	log.Printf("Video Downloaded: %s\n", videoPath)
-	log.Printf("Converting to the MP3: %s\n", videoPath)
 
 	mp3Path, err = ConvertMP4ToMp3(videoPath, mp3Path)
 	if err != nil {

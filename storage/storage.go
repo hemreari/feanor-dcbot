@@ -25,8 +25,8 @@ func NewStorageClient(cfg *config.Config) (*StorageClient, error) {
 	}, nil
 }
 
-func (s *StorageClient) InsertTrackData(artistName, trackName, youtubeID string) error {
-	_, err := s.Client.Exec("INSERT INTO music(spotify_artist_name, spotify_track_name, youtube_url) VALUES (?, ?, ?)", artistName, trackName, youtubeID)
+func (s *StorageClient) InsertTrackData(playlistID, artistName, trackName, youtubeID string) error {
+	_, err := s.Client.Exec("INSERT INTO music(spotify_playlist_id, spotify_artist_name, spotify_track_name, youtube_url) VALUES (?, ?, ?, ?)", playlistID, artistName, trackName, youtubeID)
 
 	if err != nil {
 		return err
