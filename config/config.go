@@ -4,7 +4,8 @@ type Config struct {
 	Spotify    SpotifyConfig    `json:"spotify"`
 	Youtube    YoutubeConfig    `json:"youtube"`
 	Discord    DiscordConfig    `json:"discord"`
-	MySQL      MySQLConfig      `json:"mysql"`
+	MySQLMusic MySQLMusicConfig `json:"musicDB"`
+	MySQLUser  MySQLUserConfig  `json:"userDB"`
 	PlaylistID PlaylistIDConfig `json:"playlistIDs"`
 	MusicDir   MusicDirectory   `json:"musicDirectory"`
 }
@@ -24,7 +25,15 @@ type DiscordConfig struct {
 	Token string `json:"token"`
 }
 
-type MySQLConfig struct {
+type MySQLMusicConfig struct {
+	UserName string `json:"userName"`
+	Password string `json:"password"`
+	Host     string `json:"host"`
+	DBName   string `json:"dbName"`
+	Driver   string `json:"driver"`
+}
+
+type MySQLUserConfig struct {
 	UserName string `json:"userName"`
 	Password string `json:"password"`
 	Host     string `json:"host"`

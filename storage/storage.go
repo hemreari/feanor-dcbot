@@ -7,25 +7,43 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
-type StorageClient struct {
+type MusicDBClient struct {
 	Client *sql.DB
 }
 
-func NewStorageClient(cfg *config.Config) (*StorageClient, error) {
-	dbStr := cfg.MySQL.UserName + ":" + cfg.MySQL.Password + "@" + "tcp(" + cfg.MySQL.Host + ")" + "/" + cfg.MySQL.DBName
-	driver := cfg.MySQL.Driver
+type UserDBClient struct {
+	Client *sql.DB
+}
+
+func NewMusicDBClient(cfg *config.Config) (*MusicDBClient, error) {
+	dbStr := cfg.MySQLMusic.UserName + ":" + cfg.MySQLMusic.Password + "@" + "tcp(" + cfg.MySQLMusic.Host + ")" + "/" + cfg.MySQLMusic.DBName
+	driver := cfg.MySQLMusic.Driver
 
 	client, err := sql.Open(driver, dbStr)
 	if err != nil {
 		return nil, err
 	}
 	client.SetMaxOpenConns(99)
-	return &StorageClient{
+	return &MusicDBClient{
 		Client: client,
 	}, nil
 }
 
-func (s *StorageClient) InsertTrackData(playlistID, artistName, trackName, youtubeID string) error {
+func NewUserDBClient(cfg *config.Config) (*UserDBClient, error) {
+	dbStr := cfg.MySQLUser.UserName + ":" + cfg.MySQLUser.Password + "@" + "tcp(" + cfg.MySQLUser.Host + ")" + "/" + cfg.MySQLUser.DBName
+	driver := cfg.MySQLUser.Driver
+
+	client, err := sql.Open(driver, dbStr)
+	if err != nil {
+		return nil, err
+	}
+	client.SetMaxOpenConns(99)
+	return &UserDBClient{
+		Client: client,
+	}, nil
+}
+
+func (s *MusicDBClient) InsertTrackData(playlistID, artistName, trackName, youtubeID string) error {
 	_, err := s.Client.Exec("INSERT INTO music(spotify_playlist_id, spotify_artist_name, spotify_track_name, youtube_url) VALUES (?, ?, ?, ?)", playlistID, artistName, trackName, youtubeID)
 
 	if err != nil {
@@ -34,7 +52,7 @@ func (s *StorageClient) InsertTrackData(playlistID, artistName, trackName, youtu
 	return nil
 }
 
-func (s *StorageClient) InsertLocation(path, youtubeID string) error {
+func (s *MusicDBClient) InsertLocation(path, youtubeID string) error {
 	var id string
 	idQuery := "SELECT ID from music where youtube_url=?"
 	err := s.Client.QueryRow(idQuery, youtubeID).Scan(&id)
@@ -51,7 +69,7 @@ func (s *StorageClient) InsertLocation(path, youtubeID string) error {
 }
 
 /* checks the given column field data exists */
-func (s *StorageClient) RowExists(columnName, fieldData string) (bool, error) {
+func (s *MusicDBClient) RowExists(columnName, fieldData string) (bool, error) {
 	query := "SELECT exists(SELECT ID FROM music WHERE " + columnName + "=\"" + fieldData + "\")"
 	var exists bool
 

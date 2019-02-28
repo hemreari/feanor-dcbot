@@ -58,7 +58,7 @@ func main() {
 	readConfig(&cfg, "config.json")
 	log.Println("Starting Feanor. Hope everything works well.")
 
-	mySQLClient, err := storage.NewStorageClient(&cfg)
+	musicDBClient, err := storage.NewMusicDBClient(&cfg)
 	if err != nil {
 		log.Println(err)
 	}
@@ -91,7 +91,7 @@ func main() {
 			artistsName += artists[artistIndex].Name
 		}
 
-		exists, err := mySQLClient.RowExists("spotify_artist_name", artistsName)
+		exists, err := musicDBClient.RowExists("spotify_artist_name", artistsName)
 		if err != nil {
 			log.Println(err)
 		}
@@ -102,9 +102,7 @@ func main() {
 		youtubeQueryStr := artistsName + trackName
 		youtubeID := youtubeAPI.Search(youtubeQueryStr)
 
-		log.Println(playlistID)
-
-		err = mySQLClient.InsertTrackData(playlistID, artistsName, trackName, youtubeID)
+		err = musicDBClient.InsertTrackData(playlistID, artistsName, trackName, youtubeID)
 		if err != nil {
 			log.Println(err)
 		}
@@ -112,7 +110,7 @@ func main() {
 
 	// get youtube video id's from db
 	var ytDbId string
-	rows, err := mySQLClient.Client.Query("SELECT youtube_url FROM music")
+	rows, err := musicDBClient.Client.Query("SELECT youtube_url FROM music")
 	if err != nil {
 		log.Println(err)
 	}
@@ -126,12 +124,11 @@ func main() {
 		//download the video
 		youtubeURL := "https://www.youtube.com/watch?v=" + ytDbId
 
-		log.Println(youtubeURL)
 		mp3Path, err := audio.DownloadYTVideo(youtubeURL, &cfg)
 		if err != nil {
 			log.Println(err)
 		}
-		err = mySQLClient.InsertLocation(mp3Path, ytDbId)
+		err = musicDBClient.InsertLocation(mp3Path, ytDbId)
 		if err != nil {
 			log.Println(err)
 		}
