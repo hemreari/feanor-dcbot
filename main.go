@@ -75,13 +75,20 @@ func main() {
 	}
 
 	playlistID := cfg.PlaylistID.Shame
-	spotifyPl, err := spotifyAPI.GetTrackFromPlaylist(token.AccessToken, playlistID)
+	spotifyPlTracks, err := spotifyAPI.GetTrackFromPlaylist(token.AccessToken, playlistID)
 	if err != nil {
 		log.Println(err)
 	}
 
+	spotifyPl, err := spotifyAPI.GetPlaylist(token.AccessToken, playlistID)
+	if err != nil {
+		log.Println(err)
+	}
+	playlistName := spotifyPl.Name
+	playlistOwner := spotifyPl.Owner.ID
+
 	// parse the spotify playlist to artist and track name.
-	items := spotifyPl.Items
+	items := spotifyPlTracks.Items
 	for index := range items {
 		trackName := items[index].Track.Name
 
@@ -102,7 +109,7 @@ func main() {
 		youtubeQueryStr := artistsName + trackName
 		youtubeID := youtubeAPI.Search(youtubeQueryStr)
 
-		err = musicDBClient.InsertTrackData(playlistID, artistsName, trackName, youtubeID)
+		err = musicDBClient.InsertTrackData(playlistName, playlistOwner, playlistID, artistsName, trackName, youtubeID)
 		if err != nil {
 			log.Println(err)
 		}

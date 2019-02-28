@@ -43,8 +43,8 @@ func NewUserDBClient(cfg *config.Config) (*UserDBClient, error) {
 	}, nil
 }
 
-func (s *MusicDBClient) InsertTrackData(playlistID, artistName, trackName, youtubeID string) error {
-	_, err := s.Client.Exec("INSERT INTO music(spotify_playlist_id, spotify_artist_name, spotify_track_name, youtube_url) VALUES (?, ?, ?, ?)", playlistID, artistName, trackName, youtubeID)
+func (s *MusicDBClient) InsertTrackData(playlistName, playlistOwner, playlistID, artistName, trackName, youtubeID string) error {
+	_, err := s.Client.Exec("INSERT INTO music(spotify_playlist_id, spotify_playlist_owner_id, spotify_playlist_owner_name, spotify_artist_name, spotify_track_name, youtube_url) VALUES (?, ?, ?, ?, ?, ?)", playlistID, playlistOwner, playlistName, artistName, trackName, youtubeID)
 
 	if err != nil {
 		return err

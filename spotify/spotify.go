@@ -3,7 +3,6 @@ package spotify
 import (
 	"context"
 	"encoding/json"
-	//"io/ioutil"
 	"net/http"
 
 	"golang.org/x/oauth2"
@@ -15,7 +14,7 @@ type SpotifyAPI struct {
 	ClientSecretID string
 }
 
-type SpotifyPlaylist struct {
+type SpotifyPlaylistTracks struct {
 	Items []struct {
 		Track struct {
 			Album struct {
@@ -35,6 +34,14 @@ type SpotifyPlaylist struct {
 	Offset   int         `json:"offset"`
 	Previous interface{} `json:"previous"`
 	Total    int         `json:"total"`
+}
+
+type SpotifyPlaylist struct {
+	Name  string `json:"name"`
+	Owner struct {
+		DisplayName string `json:"display_name"`
+		ID          string `json:"id"`
+	} `json:"owner"`
 }
 
 func NewSpotifyAPI(clientID, clientSecretID string) *SpotifyAPI {
@@ -59,7 +66,7 @@ func (s *SpotifyAPI) GetAPIToken() (*oauth2.Token, error) {
 	return tok, nil
 }
 
-func (s *SpotifyAPI) GetTrackFromPlaylist(token, playlistID string) (*SpotifyPlaylist, error) {
+func (s *SpotifyAPI) GetTrackFromPlaylist(token, playlistID string) (*SpotifyPlaylistTracks, error) {
 	url := "https://api.spotify.com/v1/playlists/" + playlistID + "/tracks"
 	bearerToken := "Bearer " + token
 
@@ -74,6 +81,32 @@ func (s *SpotifyAPI) GetTrackFromPlaylist(token, playlistID string) (*SpotifyPla
 
 	// spotify playlist
 	decoder := json.NewDecoder(resp.Body)
+
+	var spotifyPlTracks SpotifyPlaylistTracks
+	err = decoder.Decode(&spotifyPlTracks)
+	if err != nil {
+		return nil, err
+	}
+
+	return &spotifyPlTracks, nil
+}
+
+func (s *SpotifyAPI) GetPlaylist(token, playlistID string) (*SpotifyPlaylist, error) {
+	url := "https://api.spotify.com/v1/playlists/" + playlistID
+	bearerToken := "Bearer " + token
+
+	req, err := http.NewRequest("GET", url, nil)
+	req.Header.Add("Authorization", bearerToken)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	// spotify playlist
+	decoder := json.NewDecoder(resp.Body)
+
 	var spotifyPl SpotifyPlaylist
 	err = decoder.Decode(&spotifyPl)
 	if err != nil {
@@ -81,4 +114,5 @@ func (s *SpotifyAPI) GetTrackFromPlaylist(token, playlistID string) (*SpotifyPla
 	}
 
 	return &spotifyPl, nil
+
 }
