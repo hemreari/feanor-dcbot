@@ -81,11 +81,11 @@ func main() {
 			artistsName += artists[artistIndex].Name
 		}
 		log.Println(artistsName)
-		existsQuery := "SELECT exists(SELECT ID FROM music WHERE spotify_artist_name=\"" + artistsName + "\")"
-		exists, err := mySQLClient.RowExists(existsQuery)
+		exists, err := mySQLClient.RowExists("spotify_artist_name", artistsName)
 		if err != nil {
 			log.Println(err)
 		}
+		log.Println(exists)
 		if exists {
 			continue
 		}
@@ -113,13 +113,14 @@ func main() {
 			log.Println(err)
 		}
 		//download the video
-		youtubeURL := "https://ww.youtube.com/watch?v=" + ytDbId
+		youtubeURL := "https://www.youtube.com/watch?v=" + ytDbId
 
+		log.Println(youtubeURL)
 		mp3Path, err := audio.DownloadYTVideo(youtubeURL, &cfg)
 		if err != nil {
 			log.Println(err)
 		}
-		err = mySQLClient.InsertLocation(mp3Path)
+		err = mySQLClient.InsertLocation(mp3Path, ytDbId)
 		if err != nil {
 			log.Println(err)
 		}

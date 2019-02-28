@@ -13,7 +13,7 @@ import (
 )
 
 /* Downloads given youtube url to main directory,
- * converts the downloaded mp4 file to mp3 and return
+ * converts the downloaded mp4 file to mp3 and returns
  * the mp3 file path or err.
  * using github.com/rylio/ytdl.
  */
@@ -35,10 +35,7 @@ func DownloadYTVideo(url string, cfg *config.Config) (string, error) {
 
 	if _, err := os.Stat(mp3Path); err == nil {
 		log.Printf("%s is already converted to mp3. Skipping\n", videoPath)
-		err = os.Remove(videoPath)
-		if err != nil {
-			return "", err
-		}
+		_ = os.Remove(videoPath)
 		return mp3Path, nil
 	}
 
@@ -49,8 +46,6 @@ func DownloadYTVideo(url string, cfg *config.Config) (string, error) {
 		}
 		defer file.Close()
 		video.Download(video.Formats[0], file)
-		log.Println("Video Downloaded: " + videoPath)
-		return videoPath, nil
 	}
 	log.Printf("Video Downloaded: %s\n", videoPath)
 	log.Printf("Converting to the MP3: %s\n", videoPath)
@@ -65,7 +60,7 @@ func DownloadYTVideo(url string, cfg *config.Config) (string, error) {
 /* Converts given mp4 file to mp3 file with ffmpeg.
  * args:
  * sourcePath: mp4 file path,
- * destPath: mp3 file path*/
+ * destPath: mp3 file path */
 func ConvertMP4ToMp3(sourcePath, destPath string) (string, error) {
 	// destination path exists so mp4 file already converted.
 	// skip that file.

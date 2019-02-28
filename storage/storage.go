@@ -34,15 +34,25 @@ func (s *StorageClient) InsertTrackData(artistName, trackName, youtubeID string)
 	return nil
 }
 
-func (s *StorageClient) InsertLocation(path string) error {
-	_, err := s.Client.Exec("INSERT INTO music(location) VALUES (?)", path)
+func (s *StorageClient) InsertLocation(path, youtubeID string) error {
+	var id string
+	idQuery := "SELECT ID from music where youtube_url=?"
+	err := s.Client.QueryRow(idQuery, youtubeID).Scan(&id)
 	if err != nil {
-		return nil
+		return err
+	}
+
+	query := "update music set location=? where youtube_url=?"
+	_, err = s.Client.Exec(query, path, youtubeID)
+	if err != nil {
+		return err
 	}
 	return nil
 }
 
-func (s *StorageClient) RowExists(query string) (bool, error) {
+/* checks the given column field data exists */
+func (s *StorageClient) RowExists(columnName, fieldData string) (bool, error) {
+	query := "SELECT exists(SELECT ID FROM music WHERE " + columnName + "=\"" + fieldData + "\")"
 	var exists bool
 
 	err := s.Client.QueryRow(query).Scan(&exists)
