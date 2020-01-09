@@ -76,6 +76,8 @@ func ConvertMP4ToMp3(sourcePath, destPath string) (string, error) {
 		}
 		return destPath, nil
 	}
+	log.Println("source path: ", sourcePath)
+	log.Println("dest path:", destPath)
 	cmd := exec.Command("ffmpeg", "-i", sourcePath, destPath)
 	err := cmd.Run()
 	if err != nil {

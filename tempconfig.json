@@ -9,12 +9,6 @@
 	"discord": {
 		"token": "discordtoken"
 	},
-	"mysql": {
-		"userName": "dbusername",
-		"password": "dbpassword",
-		"host": "dbhost",
-		"dbName": "dbname"
-	},
 	"playlistIDs": {
 		"alias": "playlistid",
 		"alias2": "playlistid"
@@ -23,3 +17,4 @@
 		"downloadPath": "path to where download videos"
 	}
 }
+
