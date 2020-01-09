@@ -2,6 +2,8 @@ package audio
 
 import (
 	//"io"
+	"fmt"
+	//"bytes"
 	"log"
 	"os"
 	"os/exec"
@@ -90,6 +92,84 @@ func ConvertMP4ToMp3(sourcePath, destPath string) (string, error) {
 	}
 	log.Printf("Deleted: %s\n", sourcePath)
 	return destPath, nil
+}
+
+//not working
+func ConvertVideoToDca(videoTitle string) error {
+	log.Printf("Starting to convert %s to dca.\n", videoTitle)
+
+	cmdFfmpegStr := "/usr/bin/ffmpeg -i " + videoTitle + ".m4a" +
+		" -f s16le -ar 48000 -ac 2 pipe:1 > test123"
+	cmdDcaStr := "dca.exe test123 " + videoTitle + ".dca"
+
+	cmdFfmpeg := exec.Command(cmdFfmpegStr)
+	cmdDca := exec.Command(cmdDcaStr)
+
+	cmdFfmpeg.Stdout = os.Stdout
+	cmdFfmpeg.Stderr = os.Stderr
+
+	err := cmdFfmpeg.Run()
+	if err != nil {
+		return fmt.Errorf("Error while converting %s to dca: %v", videoTitle, err)
+	}
+
+	cmdDca.Stdout = os.Stdout
+	cmdDca.Stderr = os.Stderr
+
+	err = cmdDca.Run()
+	if err != nil {
+		return fmt.Errorf("Error2 while converting %s to dca: %v", videoTitle, err)
+	}
+
+	/*
+			cmdDca.Stdin, _ = cmdFfmpeg.StdoutPipe()
+				if err != nil {
+					return fmt.Errorf("Error while converting %s to dca: %v", videoTitle, err)
+				}
+		cmdDca.Stdout = os.Stdout
+
+		err := cmdDca.Start()
+		if err != nil {
+			return fmt.Errorf("Error1 while converting %s to dca: %v", videoTitle, err)
+		}
+
+		err = cmdFfmpeg.Run()
+		if err != nil {
+			return fmt.Errorf("Error2 while converting %s to dca: %v", videoTitle, err)
+		}
+
+		err = cmdDca.Wait()
+		if err != nil {
+			return fmt.Errorf("Error2 while converting %s to dca: %v", videoTitle, err)
+		}
+	*/
+
+	/*
+		r, w := io.Pipe()
+		cmdFfmpeg.Stdout = w
+		cmdDca.Stdin = r
+
+		var b2 bytes.Buffer
+		cmdDca.Stdout = &b2
+
+		cmdFfmpeg.Start()
+		cmdDca.Start()
+		cmdFfmpeg.Wait()
+		w.Close()
+		cmdDca.Wait()
+		io.Copy(os.Stdout, &b2)
+	*/
+
+	/*
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		err := cmd.Run()
+		if err != nil {
+			return fmt.Errorf("Error while converting %s to dca: %v", videoTitle, err)
+		}*/
+
+	return nil
 }
 
 /*

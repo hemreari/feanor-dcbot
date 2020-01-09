@@ -1,14 +1,15 @@
 package youtube
 
 import (
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
 
-	//"net/url"
-	"os"
-
+	"../audio"
 	"../config"
+	"../util"
 
 	"google.golang.org/api/googleapi/transport"
 	"google.golang.org/api/youtube/v3"
@@ -18,13 +19,20 @@ type YoutubeAPI struct {
 	DeveloperKey string
 }
 
+type SearchResult struct {
+	VideoID    string
+	VideoTitle string
+}
+
 func NewYoutubeAPI(developerKey string) *YoutubeAPI {
 	return &YoutubeAPI{
 		DeveloperKey: developerKey,
 	}
 }
 
-func (y *YoutubeAPI) Search(query string) string {
+//GetVideoID searches given query on the youtube and returns
+//first video's ID and Title.
+func (y *YoutubeAPI) GetVideoID(query string) *SearchResult {
 	developerKey := y.DeveloperKey
 
 	client := &http.Client{
@@ -45,61 +53,32 @@ func (y *YoutubeAPI) Search(query string) string {
 		log.Println(err)
 	}
 
+	//var result SearchResult
+
 	// Iterate through each item and add it to the correct list.
 	for _, item := range response.Items {
 		switch item.Id.Kind {
 		case "youtube#video":
-			return item.Id.VideoId
+			newTitle := util.FormatVideoTitle(item.Snippet.Title)
+			return &SearchResult{
+				VideoID:    item.Id.VideoId,
+				VideoTitle: newTitle,
+			}
 		default:
-			return ""
+			return &SearchResult{}
 		}
 	}
 
-	return ""
+	return &SearchResult{}
 }
 
-/*
-func DownloadMP4(urlStr string, cfg *config.Config) (string, error) {
-	log.Println("url: ", urlStr)
+func DownloadVideo(searchResult *SearchResult, cfg *config.Config) error {
+	videoTitle := searchResult.VideoTitle
 
-	if _, err := os.Stat(cfg.MusicDir.DownloadPath); os.IsNotExist(err) {
-		err := os.Mkdir(cfg.MusicDir.DownloadPath, 0777)
-		if err != nil {
-			return "", err
-		}
-	}
+	log.Printf("Starting to download: %s\n", videoTitle)
 
-	info, err := ytdl.GetVideoInfo(urlStr)
-	if err != nil {
-		return "", err
-	}
-
-	format := info.Formats.Worst(ytdl.FormatResolutionKey)[0]
-
-	videoPath := cfg.MusicDir.DownloadPath + info.Title + ".mp4"
-
-	//check video if is download already or not
-	//if video is alread downloaded don't download.
-	if _, err := os.Stat(videoPath); os.IsNotExist(err) {
-		file, err := os.Create(videoPath)
-		if err != nil {
-			return "", err
-		}
-		defer file.Close()
-		err = info.Download(format, file)
-		if err != nil {
-			return "", err
-		}
-	}
-
-	return videoPath, nil
-}
-*/
-
-func DownloadMP4(urlStr string, cfg *config.Config) error {
-	log.Println("Downloading: ", urlStr)
-
-	//check download path is exist given in the config
+	//this could be done in main(when before starting bot)
+	//check download path is exist in the given config
 	//if doesn't exist create folder.
 	if _, err := os.Stat(cfg.MusicDir.DownloadPath); os.IsNotExist(err) {
 		err := os.Mkdir(cfg.MusicDir.DownloadPath, 0777)
@@ -111,27 +90,24 @@ func DownloadMP4(urlStr string, cfg *config.Config) error {
 	ytdlArgs := []string{
 		"-f",
 		"'bestaudio[ext=m4a]",
-		urlStr,
+		"-o",
+		videoTitle + ".m4a",
+		searchResult.VideoID,
 	}
 
 	cmd := exec.Command("youtube-dl", ytdlArgs...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+
 	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("Error while downloading %s: %v", videoTitle, err)
+	}
+
+	err = audio.ConvertVideoToDca(videoTitle)
 	if err != nil {
 		return err
 	}
-	/*
-		tmpMp4Path := "Rammstein - Deutschland (Official Video)-NeQM1c-XCDc.m4a"
-
-		convertMP4toDca(tmpMp4Path)
-	*/
 
 	return nil
 }
-
-/*
-func convertMP4toDca(mp4Path string) {
-	log.Println("Converting mp4 to dca")
-}
-*/

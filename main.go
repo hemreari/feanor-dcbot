@@ -70,11 +70,12 @@ func main() {
 	if err != nil {
 		log.Println(err)
 	}
-	playlistName := spotifyPl.Name
-	log.Println("playlistName: ", playlistName)
 
-	playlistOwner := spotifyPl.Owner.ID
-	log.Println("playlistOwner: ", playlistOwner)
+	//playlistName := spotifyPl.Name
+	log.Println("playlistName: ", spotifyPl.Name)
+
+	//playlistOwner := spotifyPl.Owner.ID
+	log.Println("playlistOwner: ", spotifyPl.Owner.ID)
 
 	// parse the spotify playlist to artist and track name.
 	items := spotifyPlTracks.Items
@@ -88,12 +89,13 @@ func main() {
 		}
 
 		youtubeQueryStr := artistsName + trackName
-		youtubeID := youtubeAPI.Search(youtubeQueryStr)
+
+		ytSearchResult := youtubeAPI.GetVideoID(youtubeQueryStr)
 
 		//download the video
-		youtubeURL := "https://www.youtube.com/watch?v=" + youtubeID
+		//youtubeURL := "https://www.youtube.com/watch?v=" + youtubeID
 
-		err := youtube.DownloadMP4(youtubeURL, &cfg)
+		err := youtube.DownloadVideo(ytSearchResult, &cfg)
 		if err != nil {
 			log.Println(err)
 		}
