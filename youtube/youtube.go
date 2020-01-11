@@ -7,7 +7,7 @@ import (
 	"os"
 	"os/exec"
 
-	"../audio"
+	//"../audio"
 	"../config"
 	"../util"
 
@@ -72,8 +72,9 @@ func (y *YoutubeAPI) GetVideoID(query string) *SearchResult {
 	return &SearchResult{}
 }
 
-func DownloadVideo(searchResult *SearchResult, cfg *config.Config) error {
+func DownloadVideo(searchResult *SearchResult, cfg *config.Config) (string, error) {
 	videoTitle := searchResult.VideoTitle
+	videoPath := videoTitle + "m4a"
 
 	log.Printf("Starting to download: %s\n", videoTitle)
 
@@ -83,7 +84,7 @@ func DownloadVideo(searchResult *SearchResult, cfg *config.Config) error {
 	if _, err := os.Stat(cfg.MusicDir.DownloadPath); os.IsNotExist(err) {
 		err := os.Mkdir(cfg.MusicDir.DownloadPath, 0777)
 		if err != nil {
-			return err
+			return "", err
 		}
 	}
 
@@ -91,7 +92,7 @@ func DownloadVideo(searchResult *SearchResult, cfg *config.Config) error {
 		"-f",
 		"'bestaudio[ext=m4a]",
 		"-o",
-		videoTitle + ".m4a",
+		videoPath,
 		searchResult.VideoID,
 	}
 
@@ -101,13 +102,15 @@ func DownloadVideo(searchResult *SearchResult, cfg *config.Config) error {
 
 	err := cmd.Run()
 	if err != nil {
-		return fmt.Errorf("Error while downloading %s: %v", videoTitle, err)
+		return "", fmt.Errorf("Error while downloading %s: %v", videoTitle, err)
 	}
 
-	err = audio.ConvertVideoToDca(videoTitle)
-	if err != nil {
-		return err
-	}
+	/*
+		err = audio.ConvertVideoToDca(videoTitle)
+		if err != nil {
+			return err
+		}
+	*/
 
-	return nil
+	return videoPath, nil
 }

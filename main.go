@@ -8,11 +8,9 @@ import (
 	"os"
 	"path/filepath"
 
-	//"./audio"
 	"./bot"
 	"./config"
 	"./spotify"
-
 	"./youtube"
 )
 
@@ -92,16 +90,13 @@ func main() {
 
 		ytSearchResult := youtubeAPI.GetVideoID(youtubeQueryStr)
 
-		//download the video
-		//youtubeURL := "https://www.youtube.com/watch?v=" + youtubeID
-
-		err := youtube.DownloadVideo(ytSearchResult, &cfg)
+		_, err := youtube.DownloadVideo(ytSearchResult, &cfg)
 		if err != nil {
 			log.Println(err)
 		}
 	}
 
-	err = bot.InitBot(cfg.Discord.Token)
+	err = bot.InitBot(cfg.Discord.Token, youtubeAPI, &cfg)
 	if err != nil {
 		log.Println(err)
 	}

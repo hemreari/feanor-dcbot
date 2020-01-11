@@ -1,22 +1,46 @@
 package bot
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
-	"time"
+
+	"../config"
+	"../youtube"
 
 	"github.com/bwmarrin/discordgo"
+	"layeh.com/gopus"
+)
+
+const (
+	channels  int = 2                   // 1 for mono, 2 for stereo
+	frameRate int = 48000               // audio sampling rate
+	frameSize int = 960                 // uint16 size of each audio frame
+	maxBytes  int = (frameSize * 2) * 2 // max size of opus data
+)
+
+var (
+	speakers    map[uint32]*gopus.Decoder
+	opusEncoder *gopus.Encoder
+	mu          sync.Mutex
+	yt          *youtube.YoutubeAPI
+	cfg         *config.Config
 )
 
 var buffer = make([][]byte, 0)
 
-func InitBot(botToken string) error {
+func InitBot(botToken string, ytAPI *youtube.YoutubeAPI, config *config.Config) error {
+	yt = ytAPI
+	cfg = config
 	dg, err := discordgo.New("Bot " + botToken)
 	if err != nil {
 		return fmt.Errorf("Error while creating discord session: %v", err)
@@ -65,6 +89,14 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	if strings.HasPrefix(m.Content, "!korna") {
+		query := strings.Trim(m.Content, "!korna")
+		ytSearchRes := yt.GetVideoID(query)
+
+		videoPath, err := youtube.DownloadVideo(ytSearchRes, cfg)
+		if err != nil {
+			log.Println(err)
+			return
+		}
 		// Find the channel that the message came from.
 		c, err := s.State.Channel(m.ChannelID)
 		if err != nil {
@@ -79,18 +111,28 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			return
 		}
 
-		err = loadSound()
-		if err != nil {
-			log.Println(err)
-		}
+		/*
+			err = loadSound()
+			if err != nil {
+				log.Println(err)
+			}
+		*/
 
 		// Look for the message sender in that guild's current voice states.
 		for _, vs := range g.VoiceStates {
 			if vs.UserID == m.Author.ID {
-				err = playSound(s, g.ID, vs.ChannelID)
+				dgv, err := s.ChannelVoiceJoin(g.ID, vs.ChannelID, false, true)
 				if err != nil {
-					log.Println("Error playing sound:", err)
+					fmt.Println(err)
+					return
 				}
+				PlayAudioFile(dgv, videoPath, make(chan bool))
+				/*
+					err = playSound(s, g.ID, vs.ChannelID)
+					if err != nil {
+						log.Println("Error playing sound:", err)
+					}
+				*/
 
 				return
 			}
@@ -114,73 +156,114 @@ func guildCreate(s *discordgo.Session, event *discordgo.GuildCreate) {
 	}
 }
 
-// playSound plays the current buffer to the provided channel.
-func playSound(s *discordgo.Session, guildID, channelID string) (err error) {
-	// Join the provided voice channel.
-	vc, err := s.ChannelVoiceJoin(guildID, channelID, false, true)
+// PlayAudioFile will play the given filename to the already connected
+// Discord voice server/channel.  voice websocket and udp socket
+// must already be setup before this will work.
+func PlayAudioFile(v *discordgo.VoiceConnection, filename string, stop <-chan bool) {
+	// Create a shell command "object" to run.
+	run := exec.Command("ffmpeg", "-i", filename, "-f", "s16le", "-ar", strconv.Itoa(frameRate), "-ac", strconv.Itoa(channels), "pipe:1")
+	ffmpegout, err := run.StdoutPipe()
 	if err != nil {
-		return err
+		log.Println("StdoutPipe Error:", err)
+		return
 	}
 
-	// Sleep for a specified amount of time before playing the sound
-	time.Sleep(250 * time.Millisecond)
+	ffmpegbuf := bufio.NewReaderSize(ffmpegout, 16384)
 
-	// Start speaking.
-	vc.Speaking(true)
-
-	// Send the buffer data.
-	for _, buff := range buffer {
-		vc.OpusSend <- buff
-	}
-
-	// Stop speaking
-	vc.Speaking(false)
-
-	// Sleep for a specificed amount of time before ending.
-	time.Sleep(250 * time.Millisecond)
-
-	// Disconnect from the provided voice channel.
-	vc.Disconnect()
-
-	return nil
-}
-
-// loadSound attempts to load an encoded sound file from disk.
-func loadSound() error {
-	file, err := os.Open("test.dca")
+	// Starts the ffmpeg command
+	err = run.Start()
 	if err != nil {
-		return fmt.Errorf("Error opening dca file: %v", err)
+		log.Println("RunStart Error", err)
+		return
 	}
 
-	var opuslen int16
+	go func() {
+		<-stop
+		err = run.Process.Kill()
+	}()
+
+	// Send "speaking" packet over the voice websocket
+	err = v.Speaking(true)
+	if err != nil {
+		log.Println("Couldn't set speaking", err)
+	}
+
+	// Send not "speaking" packet over the websocket when we finish
+	defer func() {
+		err := v.Speaking(false)
+		if err != nil {
+			log.Println("Couldn't stop speaking", err)
+		}
+	}()
+
+	send := make(chan []int16, 2)
+	defer close(send)
+
+	close := make(chan bool)
+	go func() {
+		SendPCM(v, send)
+		close <- true
+	}()
 
 	for {
-		// Read opus frame length from dca file.
-		err = binary.Read(file, binary.LittleEndian, &opuslen)
-
-		// If this is the end of the file, just return.
+		// read data from ffmpeg stdout
+		audiobuf := make([]int16, frameSize*channels)
+		err = binary.Read(ffmpegbuf, binary.LittleEndian, &audiobuf)
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			err := file.Close()
-			if err != nil {
-				return err
-			}
-			return nil
+			return
 		}
-
 		if err != nil {
-			return fmt.Errorf("Error reading from dca file: %v", err)
+			log.Println("error reading from ffmpeg stdout", err)
+			return
 		}
 
-		// Read encoded pcm from dca file.
-		InBuf := make([]byte, opuslen)
-		err = binary.Read(file, binary.LittleEndian, &InBuf)
+		// Send received PCM to the sendPCM channel
+		select {
+		case send <- audiobuf:
+		case <-close:
+			return
+		}
+	}
+}
 
-		// Should not be any end of file errors
+// SendPCM will receive on the provied channel encode
+// received PCM data into Opus then send that to Discordgo
+func SendPCM(v *discordgo.VoiceConnection, pcm <-chan []int16) {
+	if pcm == nil {
+		return
+	}
+
+	var err error
+
+	opusEncoder, err = gopus.NewEncoder(frameRate, channels, gopus.Audio)
+
+	if err != nil {
+		log.Println("NewEncoder Error", err)
+		return
+	}
+
+	for {
+
+		// read pcm from chan, exit if channel is closed.
+		recv, ok := <-pcm
+		if !ok {
+			log.Println("PCM channel closed")
+			return
+		}
+
+		// try encoding pcm frame with Opus
+		opus, err := opusEncoder.Encode(recv, frameSize, maxBytes)
 		if err != nil {
-			return fmt.Errorf("Error reading from dca file: %v", err)
+			log.Println("Encoding Error", err)
+			return
 		}
 
-		// Append encoded pcm data to the buffer.
-		buffer = append(buffer, InBuf)
+		if v.Ready == false || v.OpusSend == nil {
+			// OnError(fmt.Sprintf("Discordgo not ready for opus packets. %+v : %+v", v.Ready, v.OpusSend), nil)
+			// Sending errors here might not be suited
+			return
+		}
+		// send encoded opus data to the sendOpus channel
+		v.OpusSend <- opus
 	}
 }
