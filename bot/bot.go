@@ -36,8 +36,6 @@ var (
 	cfg         *config.Config
 )
 
-var buffer = make([][]byte, 0)
-
 func InitBot(botToken string, ytAPI *youtube.YoutubeAPI, config *config.Config) error {
 	yt = ytAPI
 	cfg = config
@@ -65,7 +63,7 @@ func InitBot(botToken string, ytAPI *youtube.YoutubeAPI, config *config.Config) 
 }
 
 func ready(s *discordgo.Session, event *discordgo.Ready) {
-	s.UpdateStatus(0, "!airhorn")
+	s.UpdateStatus(0, "Valinor'dan sevgiler.")
 }
 
 func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -80,19 +78,17 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 	*/
 
-	if strings.Contains(m.Content, "secret word") {
-		s.ChannelMessageSend(m.ChannelID, "dont use that word")
-	}
+	/*
+		if strings.Contains(m.Content, "playmusic") {
+			//serverID := m.ChannelID.GuildID
+		}
+	*/
 
-	if strings.Contains(m.Content, "playmusic") {
-		//serverID := m.ChannelID.GuildID
-	}
-
-	if strings.HasPrefix(m.Content, "!korna") {
-		query := strings.Trim(m.Content, "!korna")
-		ytSearchRes := yt.GetVideoID(query)
-
-		videoPath, err := youtube.DownloadVideo(ytSearchRes, cfg)
+	//play commands searchs after !play command
+	//and plays the first result.
+	if strings.HasPrefix(m.Content, "!play") {
+		query := strings.Trim(m.Content, "!play")
+		videoPath, err := yt.SearchDownload(query)
 		if err != nil {
 			log.Println(err)
 			return
@@ -111,13 +107,6 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			return
 		}
 
-		/*
-			err = loadSound()
-			if err != nil {
-				log.Println(err)
-			}
-		*/
-
 		// Look for the message sender in that guild's current voice states.
 		for _, vs := range g.VoiceStates {
 			if vs.UserID == m.Author.ID {
@@ -127,13 +116,6 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 					return
 				}
 				PlayAudioFile(dgv, videoPath, make(chan bool))
-				/*
-					err = playSound(s, g.ID, vs.ChannelID)
-					if err != nil {
-						log.Println("Error playing sound:", err)
-					}
-				*/
-
 				return
 			}
 		}
@@ -161,7 +143,8 @@ func guildCreate(s *discordgo.Session, event *discordgo.GuildCreate) {
 // must already be setup before this will work.
 func PlayAudioFile(v *discordgo.VoiceConnection, filename string, stop <-chan bool) {
 	// Create a shell command "object" to run.
-	run := exec.Command("ffmpeg", "-i", filename, "-f", "s16le", "-ar", strconv.Itoa(frameRate), "-ac", strconv.Itoa(channels), "pipe:1")
+	run := exec.Command("ffmpeg", "-i", filename, "-f", "s16le", "-ar",
+		strconv.Itoa(frameRate), "-ac", strconv.Itoa(channels), "pipe:1")
 	ffmpegout, err := run.StdoutPipe()
 	if err != nil {
 		log.Println("StdoutPipe Error:", err)
@@ -204,6 +187,8 @@ func PlayAudioFile(v *discordgo.VoiceConnection, filename string, stop <-chan bo
 		SendPCM(v, send)
 		close <- true
 	}()
+
+	log.Printf("Now playing %s.\n", filename)
 
 	for {
 		// read data from ffmpeg stdout

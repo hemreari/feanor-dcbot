@@ -7,8 +7,6 @@ import (
 	"os"
 	"os/exec"
 
-	//"../audio"
-	"../config"
 	"../util"
 
 	"google.golang.org/api/googleapi/transport"
@@ -41,7 +39,7 @@ func (y *YoutubeAPI) GetVideoID(query string) *SearchResult {
 
 	service, err := youtube.New(client)
 	if err != nil {
-		log.Fatalf("Error creating new YouTube client: %v", err)
+		log.Fatalf("Error while creating new YouTube client: %v", err)
 	}
 
 	// Make the API call to YouTube.
@@ -52,8 +50,6 @@ func (y *YoutubeAPI) GetVideoID(query string) *SearchResult {
 	if err != nil {
 		log.Println(err)
 	}
-
-	//var result SearchResult
 
 	// Iterate through each item and add it to the correct list.
 	for _, item := range response.Items {
@@ -72,21 +68,11 @@ func (y *YoutubeAPI) GetVideoID(query string) *SearchResult {
 	return &SearchResult{}
 }
 
-func DownloadVideo(searchResult *SearchResult, cfg *config.Config) (string, error) {
+func DownloadVideo(searchResult *SearchResult) (string, error) {
 	videoTitle := searchResult.VideoTitle
-	videoPath := videoTitle + "m4a"
+	videoPath := videoTitle + ".m4a"
 
 	log.Printf("Starting to download: %s\n", videoTitle)
-
-	//this could be done in main(when before starting bot)
-	//check download path is exist in the given config
-	//if doesn't exist create folder.
-	if _, err := os.Stat(cfg.MusicDir.DownloadPath); os.IsNotExist(err) {
-		err := os.Mkdir(cfg.MusicDir.DownloadPath, 0777)
-		if err != nil {
-			return "", err
-		}
-	}
 
 	ytdlArgs := []string{
 		"-f",
@@ -105,12 +91,17 @@ func DownloadVideo(searchResult *SearchResult, cfg *config.Config) (string, erro
 		return "", fmt.Errorf("Error while downloading %s: %v", videoTitle, err)
 	}
 
-	/*
-		err = audio.ConvertVideoToDca(videoTitle)
-		if err != nil {
-			return err
-		}
-	*/
-
 	return videoPath, nil
+}
+
+//SearchDownload combines abilities of GetVideoID and
+//DownloadVideo func's as a standalone function
+func (y *YoutubeAPI) SearchDownload(query string) (string, error) {
+	searchRes := y.GetVideoID(query)
+
+	path, err := DownloadVideo(searchRes)
+	if err != nil {
+		return "", err
+	}
+	return path, nil
 }
