@@ -21,3 +21,11 @@ func GetWorkingDirPath() (string, error) {
 	}
 	return dir, nil
 }
+
+func DeleteFile(path string) error {
+	err := os.Remove(path)
+	if err != nil {
+		return fmt.Errorf("Error while deleting %s file: %v", path, err)
+	}
+	return nil
+}

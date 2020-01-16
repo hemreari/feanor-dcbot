@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"../config"
+	"../util"
 	"../youtube"
 
 	"github.com/bwmarrin/discordgo"
@@ -28,12 +29,19 @@ const (
 	maxBytes  int = (frameSize * 2) * 2 // max size of opus data
 )
 
+type VoiceInstance struct {
+	dgv     *discordgo.VoiceConnection
+	session *discordgo.Session
+	stop    bool
+}
+
 var (
 	speakers    map[uint32]*gopus.Decoder
 	opusEncoder *gopus.Encoder
 	mu          sync.Mutex
 	yt          *youtube.YoutubeAPI
 	cfg         *config.Config
+	vi          *VoiceInstance
 )
 
 func InitBot(botToken string, ytAPI *youtube.YoutubeAPI, config *config.Config) error {
@@ -51,6 +59,12 @@ func InitBot(botToken string, ytAPI *youtube.YoutubeAPI, config *config.Config) 
 	err = dg.Open()
 	if err != nil {
 		return fmt.Errorf("Error while opening discord session: %v", err)
+	}
+
+	vi = &VoiceInstance{
+		session: dg,
+		dgv:     nil,
+		stop:    false,
 	}
 
 	log.Println("Feanor is running. Press Ctrl-c to exit.")
@@ -96,6 +110,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		// Find the channel that the message came from.
 		c, err := s.State.Channel(m.ChannelID)
 		if err != nil {
+			log.Printf("Couldn't find channel: %v\n", err)
 			// Could not find channel.
 			return
 		}
@@ -103,6 +118,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		// Find the guild for that channel.
 		g, err := s.State.Guild(c.GuildID)
 		if err != nil {
+			log.Printf("Couldn't find guild: %v\n", err)
 			// Could not find guild.
 			return
 		}
@@ -111,12 +127,38 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		for _, vs := range g.VoiceStates {
 			if vs.UserID == m.Author.ID {
 				dgv, err := s.ChannelVoiceJoin(g.ID, vs.ChannelID, false, true)
+				vi.dgv = dgv
 				if err != nil {
-					fmt.Println(err)
+					fmt.Printf("Couldn't join the voice channel: %v\n", err)
 					return
 				}
-				PlayAudioFile(dgv, videoPath, make(chan bool))
+				vi.PlayAudioFile(videoPath, make(chan bool))
 				return
+			}
+		}
+	}
+
+	//stop commands stops music if any music is playing
+	if strings.Compare(m.Content, "!stop") == 0 {
+		log.Println("stop command received.")
+		c, err := s.State.Channel(m.ChannelID)
+		if err != nil {
+			log.Printf("Couldn't find channel: %v\n", err)
+			// Could not find channel.
+			return
+		}
+
+		// Find the guild for that channel.
+		g, err := s.State.Guild(c.GuildID)
+		if err != nil {
+			log.Printf("Couldn't find guild: %v\n", err)
+			// Could not find guild.
+			return
+		}
+
+		for _, vs := range g.VoiceStates {
+			if vs.UserID == m.Author.ID {
+				vi.StopMusic()
 			}
 		}
 	}
@@ -138,10 +180,14 @@ func guildCreate(s *discordgo.Session, event *discordgo.GuildCreate) {
 	}
 }
 
+func (vi *VoiceInstance) StopMusic() {
+	vi.stop = true
+}
+
 // PlayAudioFile will play the given filename to the already connected
 // Discord voice server/channel.  voice websocket and udp socket
 // must already be setup before this will work.
-func PlayAudioFile(v *discordgo.VoiceConnection, filename string, stop <-chan bool) {
+func (vi *VoiceInstance) PlayAudioFile(filename string, stop <-chan bool) {
 	// Create a shell command "object" to run.
 	run := exec.Command("ffmpeg", "-i", filename, "-f", "s16le", "-ar",
 		strconv.Itoa(frameRate), "-ac", strconv.Itoa(channels), "pipe:1")
@@ -166,16 +212,28 @@ func PlayAudioFile(v *discordgo.VoiceConnection, filename string, stop <-chan bo
 	}()
 
 	// Send "speaking" packet over the voice websocket
-	err = v.Speaking(true)
+	err = vi.dgv.Speaking(true)
+	//err = v.Speaking(true)
 	if err != nil {
 		log.Println("Couldn't set speaking", err)
 	}
 
 	// Send not "speaking" packet over the websocket when we finish
 	defer func() {
-		err := v.Speaking(false)
+		err := vi.dgv.Speaking(false)
+		//err := v.Speaking(false)
 		if err != nil {
 			log.Println("Couldn't stop speaking", err)
+		}
+		vi.dgv.Disconnect()
+		//v.Disconnect()
+		log.Printf("Bot disconnected from the voice channel.\n")
+
+		err = util.DeleteFile(filename)
+		if err != nil {
+			log.Println(err)
+		} else {
+			log.Printf("%s is deleted\n", filename)
 		}
 	}()
 
@@ -184,7 +242,7 @@ func PlayAudioFile(v *discordgo.VoiceConnection, filename string, stop <-chan bo
 
 	close := make(chan bool)
 	go func() {
-		SendPCM(v, send)
+		SendPCM(vi.dgv, send)
 		close <- true
 	}()
 
@@ -199,6 +257,14 @@ func PlayAudioFile(v *discordgo.VoiceConnection, filename string, stop <-chan bo
 		}
 		if err != nil {
 			log.Println("error reading from ffmpeg stdout", err)
+			return
+		}
+
+		if vi.stop == true {
+			err = run.Process.Kill()
+			if err != nil {
+				log.Printf("Error while killing process: %v", err)
+			}
 			return
 		}
 
