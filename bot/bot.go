@@ -259,10 +259,7 @@ func (vi *VoiceInstance) PlayQueue(stop <-chan bool) {
 		}
 
 		nextItemPath := strings.Trim(fmt.Sprintf("%v", nextItem), "[]")
-
 		log.Println("Next item: ", nextItemPath)
-		log.Println("queue: ", vi.playlist)
-
 		vi.PlayAudioFile(nextItemPath, stop)
 	}
 }
@@ -327,13 +324,17 @@ func (vi *VoiceInstance) PlayAudioFile(filename string, stop <-chan bool) {
 			return
 		}
 
-		if vi.stop == true || vi.skip == true {
+		if vi.skip == true {
 			err = run.Process.Kill()
 			if err != nil {
 				log.Printf("Error while killing process: %v", err)
 			}
-			vi.stop = false
 			vi.skip = false
+			return
+		}
+
+		if vi.stop == true {
+			vi.disconnectBot()
 			return
 		}
 
@@ -344,6 +345,37 @@ func (vi *VoiceInstance) PlayAudioFile(filename string, stop <-chan bool) {
 			return
 		}
 	}
+}
+
+//disconnectBot removes bot from the voice channel
+//and clears playlist queue.
+func (vi *VoiceInstance) disconnectBot() {
+	//delete all items in the playlist queue
+	for !vi.playlist.Empty() {
+		nextItem, err := vi.playlist.Get(1)
+		if err != nil {
+			log.Printf("Error while getting item from playlist: %v", err)
+			return
+		}
+
+		nextItemPath := strings.Trim(fmt.Sprintf("%v", nextItem), "[]")
+		util.DeleteFile(nextItemPath)
+	}
+
+	vi.playlist.Dispose()
+
+	log.Println("All files has been deleted and queue is disposed.")
+
+	err := vi.dgv.Speaking(false)
+	if err != nil {
+		log.Println("Couldn't stop speaking", err)
+	}
+
+	vi.dgv.Disconnect()
+	log.Printf("Bot disconnected from the voice channel.\n")
+	vi.stop = false
+	vi.isPlaying = false
+	return
 }
 
 func (vi *VoiceInstance) displayPlaylist(m *discordgo.MessageCreate) error {
