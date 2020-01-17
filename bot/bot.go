@@ -18,6 +18,7 @@ import (
 	"../util"
 	"../youtube"
 
+	"github.com/Workiva/go-datastructures/queue"
 	"github.com/bwmarrin/discordgo"
 	"layeh.com/gopus"
 )
@@ -30,9 +31,12 @@ const (
 )
 
 type VoiceInstance struct {
-	dgv     *discordgo.VoiceConnection
-	session *discordgo.Session
-	stop    bool
+	dgv       *discordgo.VoiceConnection
+	session   *discordgo.Session
+	stop      bool
+	skip      bool
+	isPlaying bool
+	playlist  *queue.Queue
 }
 
 var (
@@ -61,10 +65,15 @@ func InitBot(botToken string, ytAPI *youtube.YoutubeAPI, config *config.Config) 
 		return fmt.Errorf("Error while opening discord session: %v", err)
 	}
 
+	playlist := queue.New(20)
+
 	vi = &VoiceInstance{
-		session: dg,
-		dgv:     nil,
-		stop:    false,
+		session:   dg,
+		dgv:       nil,
+		stop:      false,
+		skip:      false,
+		isPlaying: false,
+		playlist:  playlist,
 	}
 
 	log.Println("Feanor is running. Press Ctrl-c to exit.")
@@ -92,21 +101,40 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 	*/
 
-	/*
-		if strings.Contains(m.Content, "playmusic") {
-			//serverID := m.ChannelID.GuildID
-		}
-	*/
+	//show command prints current playlist.
+	if strings.HasPrefix(m.Content, "!show") {
+		vi.displayPlaylist(m)
+	}
+
+	//skip commands plays next song
+	if strings.Compare(m.Content, "!skip") == 0 {
+		vi.SkipSong()
+	}
 
 	//play commands searchs after !play command
 	//and plays the first result.
 	if strings.HasPrefix(m.Content, "!play") {
 		query := strings.Trim(m.Content, "!play")
+		if query == "" {
+			return
+		}
+
 		videoPath, err := yt.SearchDownload(query)
 		if err != nil {
 			log.Println(err)
 			return
 		}
+
+		if vi.isPlaying == true && !vi.playlist.Empty() {
+			vi.playlist.Put(videoPath)
+			return
+		}
+
+		if vi.isPlaying == true && vi.playlist.Empty() {
+			vi.playlist.Put(videoPath)
+			return
+		}
+
 		// Find the channel that the message came from.
 		c, err := s.State.Channel(m.ChannelID)
 		if err != nil {
@@ -132,7 +160,12 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 					fmt.Printf("Couldn't join the voice channel: %v\n", err)
 					return
 				}
-				vi.PlayAudioFile(videoPath, make(chan bool))
+				//if playlist queue is empty, put first
+				//item and play the playlist
+				if vi.playlist.Empty() && vi.isPlaying == false {
+					vi.playlist.Put(videoPath)
+					vi.PlayQueue(make(chan bool))
+				}
 				return
 			}
 		}
@@ -140,7 +173,10 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	//stop commands stops music if any music is playing
 	if strings.Compare(m.Content, "!stop") == 0 {
-		log.Println("stop command received.")
+		if vi.isPlaying == false {
+			return
+		}
+
 		c, err := s.State.Channel(m.ChannelID)
 		if err != nil {
 			log.Printf("Couldn't find channel: %v\n", err)
@@ -182,6 +218,53 @@ func guildCreate(s *discordgo.Session, event *discordgo.GuildCreate) {
 
 func (vi *VoiceInstance) StopMusic() {
 	vi.stop = true
+	vi.isPlaying = false
+}
+
+func (vi *VoiceInstance) SkipSong() {
+	vi.skip = true
+}
+
+func (vi *VoiceInstance) PlayQueue(stop <-chan bool) {
+	//check playlist queue empty or not
+	if vi.playlist.Empty() {
+		log.Printf("Playlist is empty, quiting.\n")
+		return
+	}
+	// Send "speaking" packet over the voice websocket
+	err := vi.dgv.Speaking(true)
+	if err != nil {
+		log.Println("Couldn't set speaking", err)
+	}
+
+	defer func() {
+		err := vi.dgv.Speaking(false)
+		if err != nil {
+			log.Println("Couldn't stop speaking", err)
+		}
+		vi.dgv.Disconnect()
+		log.Printf("Bot disconnected from the voice channel.\n")
+		vi.stop = false
+		vi.isPlaying = false
+	}()
+
+	//if playlist is not empty, retrieve first item
+	//from the queue and play it.
+	vi.isPlaying = true
+	for !vi.playlist.Empty() {
+		nextItem, err := vi.playlist.Get(1)
+		if err != nil {
+			log.Printf("Error while getting item from playlist: %v", err)
+			return
+		}
+
+		nextItemPath := strings.Trim(fmt.Sprintf("%v", nextItem), "[]")
+
+		log.Println("Next item: ", nextItemPath)
+		log.Println("queue: ", vi.playlist)
+
+		vi.PlayAudioFile(nextItemPath, stop)
+	}
 }
 
 // PlayAudioFile will play the given filename to the already connected
@@ -211,25 +294,9 @@ func (vi *VoiceInstance) PlayAudioFile(filename string, stop <-chan bool) {
 		err = run.Process.Kill()
 	}()
 
-	// Send "speaking" packet over the voice websocket
-	err = vi.dgv.Speaking(true)
-	//err = v.Speaking(true)
-	if err != nil {
-		log.Println("Couldn't set speaking", err)
-	}
-
 	// Send not "speaking" packet over the websocket when we finish
 	defer func() {
-		err := vi.dgv.Speaking(false)
-		//err := v.Speaking(false)
-		if err != nil {
-			log.Println("Couldn't stop speaking", err)
-		}
-		vi.dgv.Disconnect()
-		//v.Disconnect()
-		log.Printf("Bot disconnected from the voice channel.\n")
-
-		err = util.DeleteFile(filename)
+		err := util.DeleteFile(filename)
 		if err != nil {
 			log.Println(err)
 		} else {
@@ -260,11 +327,13 @@ func (vi *VoiceInstance) PlayAudioFile(filename string, stop <-chan bool) {
 			return
 		}
 
-		if vi.stop == true {
+		if vi.stop == true || vi.skip == true {
 			err = run.Process.Kill()
 			if err != nil {
 				log.Printf("Error while killing process: %v", err)
 			}
+			vi.stop = false
+			vi.skip = false
 			return
 		}
 
@@ -275,6 +344,11 @@ func (vi *VoiceInstance) PlayAudioFile(filename string, stop <-chan bool) {
 			return
 		}
 	}
+}
+
+func (vi *VoiceInstance) displayPlaylist(m *discordgo.MessageCreate) error {
+	log.Println("playlist:", vi.playlist)
+	return nil
 }
 
 // SendPCM will receive on the provied channel encode

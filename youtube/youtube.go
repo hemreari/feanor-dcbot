@@ -83,7 +83,6 @@ func DownloadVideo(searchResult *SearchResult) (string, error) {
 	}
 
 	cmd := exec.Command("youtube-dl", ytdlArgs...)
-	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	err := cmd.Run()
