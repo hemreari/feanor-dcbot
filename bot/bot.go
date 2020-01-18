@@ -361,10 +361,7 @@ func (vi *VoiceInstance) disconnectBot() {
 		nextItemPath := strings.Trim(fmt.Sprintf("%v", nextItem), "[]")
 		util.DeleteFile(nextItemPath)
 	}
-
-	vi.playlist.Dispose()
-
-	log.Println("All files has been deleted and queue is disposed.")
+	log.Println("All files has been deleted.")
 
 	err := vi.dgv.Speaking(false)
 	if err != nil {
