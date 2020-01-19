@@ -3,6 +3,7 @@ package spotify
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"golang.org/x/oauth2"
@@ -12,6 +13,7 @@ import (
 type SpotifyAPI struct {
 	ClientID       string
 	ClientSecretID string
+	BearerToken    string
 }
 
 type SpotifyPlaylistTracks struct {
@@ -36,7 +38,7 @@ type SpotifyPlaylistTracks struct {
 	Total    int         `json:"total"`
 }
 
-type SpotifyPlaylist struct {
+type SpotifyPlaylistInfo struct {
 	Name  string `json:"name"`
 	Owner struct {
 		DisplayName string `json:"display_name"`
@@ -44,14 +46,30 @@ type SpotifyPlaylist struct {
 	} `json:"owner"`
 }
 
+//!!!! Spotify api endpoints requires bearer token, clientID and
+//clientSecretID needed only for acquiring the bearer token.
+//endpoint functions could be call by a different struct that
+//contains only acquired bearer token.
 func NewSpotifyAPI(clientID, clientSecretID string) *SpotifyAPI {
-	return &SpotifyAPI{
+	spoAPI := &SpotifyAPI{
 		ClientID:       clientID,
 		ClientSecretID: clientSecretID,
 	}
+
+	bearerToken, err := spoAPI.getAPIToken()
+	if err != nil {
+		log.Printf("Error while getting Spotify OAUTH Token: %v", err)
+	}
+
+	return &SpotifyAPI{
+		ClientID:       clientID,
+		ClientSecretID: clientSecretID,
+		BearerToken:    bearerToken.AccessToken,
+	}
 }
 
-func (s *SpotifyAPI) GetAPIToken() (*oauth2.Token, error) {
+//getAPIToken returns spotify oauth token
+func (s *SpotifyAPI) getAPIToken() (*oauth2.Token, error) {
 	ctx := context.Background()
 	conf := &clientcredentials.Config{
 		ClientID:     s.ClientID,
@@ -66,9 +84,11 @@ func (s *SpotifyAPI) GetAPIToken() (*oauth2.Token, error) {
 	return tok, nil
 }
 
-func (s *SpotifyAPI) GetTrackFromPlaylist(token, playlistID string) (*SpotifyPlaylistTracks, error) {
+//GetTracksFromPlaylist returns track information from the given
+//spotify playlist ID.
+func (s *SpotifyAPI) GetTracksFromPlaylist(playlistID string) (*SpotifyPlaylistTracks, error) {
 	url := "https://api.spotify.com/v1/playlists/" + playlistID + "/tracks"
-	bearerToken := "Bearer " + token
+	bearerToken := "Bearer " + s.BearerToken
 
 	req, err := http.NewRequest("GET", url, nil)
 	req.Header.Add("Authorization", bearerToken)
@@ -91,9 +111,9 @@ func (s *SpotifyAPI) GetTrackFromPlaylist(token, playlistID string) (*SpotifyPla
 	return &spotifyPlTracks, nil
 }
 
-func (s *SpotifyAPI) GetPlaylist(token, playlistID string) (*SpotifyPlaylist, error) {
+func (s *SpotifyAPI) GetPlaylist(playlistID string) (*SpotifyPlaylistInfo, error) {
 	url := "https://api.spotify.com/v1/playlists/" + playlistID
-	bearerToken := "Bearer " + token
+	bearerToken := "Bearer " + s.BearerToken
 
 	req, err := http.NewRequest("GET", url, nil)
 	req.Header.Add("Authorization", bearerToken)
@@ -107,12 +127,11 @@ func (s *SpotifyAPI) GetPlaylist(token, playlistID string) (*SpotifyPlaylist, er
 	// spotify playlist
 	decoder := json.NewDecoder(resp.Body)
 
-	var spotifyPl SpotifyPlaylist
+	var spotifyPl SpotifyPlaylistInfo
 	err = decoder.Decode(&spotifyPl)
 	if err != nil {
 		return nil, err
 	}
 
 	return &spotifyPl, nil
-
 }

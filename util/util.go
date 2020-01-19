@@ -29,3 +29,15 @@ func DeleteFile(path string) error {
 	}
 	return nil
 }
+
+//GetSpotifyPlaylistID returns playlist ID
+//from the given url
+//TODO: Error checking
+func GetSpotifyPlaylistID(url string) string {
+	return strings.Split(url, ":")[2]
+	/*
+		seperated := strings.Split(url, "?")[1]
+		playlistID := strings.Trim(seperated, "si=")
+		return playlistID
+	*/
+}

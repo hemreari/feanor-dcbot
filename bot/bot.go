@@ -15,6 +15,7 @@ import (
 	"syscall"
 
 	"../config"
+	"../spotify"
 	"../util"
 	"../youtube"
 
@@ -118,57 +119,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		if query == "" {
 			return
 		}
-
-		videoPath, err := yt.SearchDownload(query)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-
-		if vi.isPlaying == true && !vi.playlist.Empty() {
-			vi.playlist.Put(videoPath)
-			return
-		}
-
-		if vi.isPlaying == true && vi.playlist.Empty() {
-			vi.playlist.Put(videoPath)
-			return
-		}
-
-		// Find the channel that the message came from.
-		c, err := s.State.Channel(m.ChannelID)
-		if err != nil {
-			log.Printf("Couldn't find channel: %v\n", err)
-			// Could not find channel.
-			return
-		}
-
-		// Find the guild for that channel.
-		g, err := s.State.Guild(c.GuildID)
-		if err != nil {
-			log.Printf("Couldn't find guild: %v\n", err)
-			// Could not find guild.
-			return
-		}
-
-		// Look for the message sender in that guild's current voice states.
-		for _, vs := range g.VoiceStates {
-			if vs.UserID == m.Author.ID {
-				dgv, err := s.ChannelVoiceJoin(g.ID, vs.ChannelID, false, true)
-				vi.dgv = dgv
-				if err != nil {
-					fmt.Printf("Couldn't join the voice channel: %v\n", err)
-					return
-				}
-				//if playlist queue is empty, put first
-				//item and play the playlist
-				if vi.playlist.Empty() && vi.isPlaying == false {
-					vi.playlist.Put(videoPath)
-					vi.PlayQueue(make(chan bool))
-				}
-				return
-			}
-		}
+		vi.prepPlay(query, s, m)
 	}
 
 	//stop commands stops music if any music is playing
@@ -198,6 +149,16 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			}
 		}
 	}
+
+	//ex: https://open.spotify.com/playlist/64TTQTsv3RvUOjgyGijamA?si=y5adpUZRRPqk7RUR_yMgwQ
+	if strings.HasPrefix(m.Content, "playlist!") {
+		link := strings.Trim(m.Content, "playlist!")
+		if strings.Contains(link, "spotify") {
+			playlistID := util.GetSpotifyPlaylistID(link)
+			log.Println("PlaylistID: ", playlistID)
+			vi.prepSpotifyPlaylist(playlistID, s, m)
+		}
+	}
 }
 
 // This function will be called (due to AddHandler above) every time a new
@@ -223,6 +184,145 @@ func (vi *VoiceInstance) StopMusic() {
 
 func (vi *VoiceInstance) SkipSong() {
 	vi.skip = true
+}
+
+//prepSpotifyPlaylist clears the current queue and inserts all
+//the songs that present in the given spotify playlist and
+//plays this queue.
+func (vi *VoiceInstance) prepSpotifyPlaylist(playlistID string, s *discordgo.Session,
+	m *discordgo.MessageCreate) {
+	spotifyAPI := initSpotifyAPI()
+
+	//get playlist owner
+	sptfyPlaylistInfo, err := spotifyAPI.GetPlaylist(playlistID)
+	if err != nil {
+		log.Printf("Error while getting Spotify playlist information: %v", err)
+	}
+
+	log.Println("Playlist Name: ", sptfyPlaylistInfo.Name)
+	log.Println("Playlist Owner: ", sptfyPlaylistInfo.Owner.ID)
+
+	//get playlist tracks
+	sptfyTracks, err := spotifyAPI.GetTracksFromPlaylist(playlistID)
+	if err != nil {
+		log.Printf("Error while getting Spotify playlist tracks: %v", err)
+	}
+
+	vi.playlist = clearPlaylistQueue(vi.playlist)
+
+	//parse playlist tracks to artist and track name.
+	items := sptfyTracks.Items
+	for index := range items {
+		trackName := items[index].Track.Name
+
+		var artistsName string
+		artists := items[index].Track.Artists
+		for artistIndex := range artists {
+			artistsName += artists[artistIndex].Name
+		}
+
+		//this part could be done concurrent.
+		//and should be done.
+		ytQuery := artistsName + trackName
+		videoPath, err := yt.SearchDownload(ytQuery)
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+
+		vi.playlist.Put(videoPath)
+	}
+
+	// Find the channel that the message came from.
+	c, err := s.State.Channel(m.ChannelID)
+	if err != nil {
+		log.Printf("Couldn't find channel: %v\n", err)
+		// Could not find channel.
+		return
+	}
+
+	// Find the guild for that channel.
+	g, err := s.State.Guild(c.GuildID)
+	if err != nil {
+		log.Printf("Couldn't find guild: %v\n", err)
+		// Could not find guild.
+		return
+	}
+
+	// Look for the message sender in that guild's current voice states.
+	for _, vs := range g.VoiceStates {
+		if vs.UserID == m.Author.ID {
+			dgv, err := s.ChannelVoiceJoin(g.ID, vs.ChannelID, false, true)
+			vi.dgv = dgv
+			if err != nil {
+				fmt.Printf("Couldn't join the voice channel: %v\n", err)
+				return
+			}
+			vi.PlayQueue(make(chan bool))
+			return
+		}
+	}
+}
+
+//initSpotifyAPI returns the required struct to use Spotify
+//endpoint functions.
+func initSpotifyAPI() *spotify.SpotifyAPI {
+	spotifyAPI := spotify.NewSpotifyAPI(cfg.Spotify.ClientID, cfg.Spotify.ClientSecretID)
+	return spotifyAPI
+}
+
+//!!!!!
+func (vi *VoiceInstance) prepPlay(query string, s *discordgo.Session, m *discordgo.MessageCreate) {
+	videoPath, err := yt.SearchDownload(query)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	if vi.isPlaying == true && !vi.playlist.Empty() {
+		vi.playlist.Put(videoPath)
+		return
+	}
+
+	if vi.isPlaying == true && vi.playlist.Empty() {
+		vi.playlist.Put(videoPath)
+		return
+	}
+
+	// Find the channel that the message came from.
+	c, err := s.State.Channel(m.ChannelID)
+	if err != nil {
+		log.Printf("Couldn't find channel: %v\n", err)
+		// Could not find channel.
+		return
+	}
+
+	// Find the guild for that channel.
+	g, err := s.State.Guild(c.GuildID)
+	if err != nil {
+		log.Printf("Couldn't find guild: %v\n", err)
+		// Could not find guild.
+		return
+	}
+
+	// Look for the message sender in that guild's current voice states.
+	for _, vs := range g.VoiceStates {
+		if vs.UserID == m.Author.ID {
+			dgv, err := s.ChannelVoiceJoin(g.ID, vs.ChannelID, false, true)
+			vi.dgv = dgv
+			if err != nil {
+				fmt.Printf("Couldn't join the voice channel: %v\n", err)
+				return
+			}
+			//if playlist queue is empty, put first
+			//item and play the playlist
+			if vi.playlist.Empty() && vi.isPlaying == false {
+				vi.playlist.Put(videoPath)
+				vi.PlayQueue(make(chan bool))
+			}
+			return
+		}
+	}
 }
 
 func (vi *VoiceInstance) PlayQueue(stop <-chan bool) {
@@ -334,7 +434,7 @@ func (vi *VoiceInstance) PlayAudioFile(filename string, stop <-chan bool) {
 		}
 
 		if vi.stop == true {
-			vi.disconnectBot()
+			vi.clearQueueStopBot()
 			return
 		}
 
@@ -347,32 +447,58 @@ func (vi *VoiceInstance) PlayAudioFile(filename string, stop <-chan bool) {
 	}
 }
 
-//disconnectBot removes bot from the voice channel
-//and clears playlist queue.
+//clearQueueStopBot clears current playlist queue and
+//removes bot from the voice channel.
+func (vi *VoiceInstance) clearQueueStopBot() {
+	vi.playlist = clearPlaylistQueue(vi.playlist)
+	vi.disconnectBot()
+}
+
+//disconnectBot disconnects bot from the voice channel
 func (vi *VoiceInstance) disconnectBot() {
-	//delete all items in the playlist queue
-	for !vi.playlist.Empty() {
-		nextItem, err := vi.playlist.Get(1)
-		if err != nil {
-			log.Printf("Error while getting item from playlist: %v", err)
-			return
-		}
-
-		nextItemPath := strings.Trim(fmt.Sprintf("%v", nextItem), "[]")
-		util.DeleteFile(nextItemPath)
-	}
-	log.Println("All files has been deleted.")
-
 	err := vi.dgv.Speaking(false)
 	if err != nil {
 		log.Println("Couldn't stop speaking", err)
 	}
-
 	vi.dgv.Disconnect()
 	log.Printf("Bot disconnected from the voice channel.\n")
 	vi.stop = false
 	vi.isPlaying = false
 	return
+}
+
+//clearPlaylistQueue removes all items in the queue
+//and deletes all downloaded files.
+//if queue cleaning process is successfull returns empty
+//queue if it is not returns newly created queue.
+
+//TODO: check whether queue path is present or not
+//in the working dir.
+func clearPlaylistQueue(playlistQueue *queue.Queue) *queue.Queue {
+	for !playlistQueue.Empty() {
+		nextItem, err := playlistQueue.Get(1)
+		if err != nil {
+			log.Printf("Error while getting item from playlist: %v", err)
+			return createNewQueue()
+		}
+
+		nextItemPath := strings.Trim(fmt.Sprintf("%v", nextItem), "[]")
+		util.DeleteFile(nextItemPath)
+	}
+	if playlistQueue.Empty() {
+		log.Println("All files has been deleted and Queue cleared.")
+		return playlistQueue
+	} else {
+		log.Printf("Creating new playlist queue.")
+		return createNewQueue()
+	}
+}
+
+//createNewQueue create new playlist queue and
+//returns newly created queue.
+func createNewQueue() *queue.Queue {
+	newQueue := queue.New(20)
+	return newQueue
 }
 
 func (vi *VoiceInstance) displayPlaylist(m *discordgo.MessageCreate) error {

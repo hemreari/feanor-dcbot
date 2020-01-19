@@ -44,19 +44,9 @@ func main() {
 	readConfig(&cfg, "config.json")
 	log.Println("Starting Feanor.")
 
-	//clientID := cfg.Spotify.ClientID
-	//clientSecretID := cfg.Spotify.ClientSecretID
-
 	//make api connections
-	//spotifyAPI := spotify.NewSpotifyAPI(clientID, clientSecretID)
 	youtubeAPI := youtube.NewYoutubeAPI(cfg.Youtube.ApiKey)
 
-	/*
-		token, err := spotifyAPI.GetAPIToken()
-		if err != nil {
-			log.Println(err)
-		}
-	*/
 	/*
 		//get spotify playlist
 		playlistID := cfg.PlaylistID.Shame
