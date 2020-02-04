@@ -74,6 +74,8 @@ func DownloadVideo(searchResult *SearchResult) (string, error) {
 
 	log.Printf("Starting to download: %s\n", videoTitle)
 
+	log.Println("video ID: ", searchResult.VideoID)
+
 	ytdlArgs := []string{
 		"-f",
 		"'bestaudio[ext=m4a]",
@@ -103,4 +105,10 @@ func (y *YoutubeAPI) SearchDownload(query string) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+//DownloadQueue takes a queue as a parameter and
+//starts to download items of this queue.
+func (y *YoutubeAPI) DownloadQueue() {
+
 }
