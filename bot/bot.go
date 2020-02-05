@@ -246,7 +246,7 @@ func (vi *VoiceInstance) prepSpotifyPlaylist(playlistID string, s *discordgo.Ses
 				fmt.Printf("Couldn't join the voice channel: %v\n", err)
 				return
 			}
-			vi.PlayQueue(make(chan bool))
+			vi.PlayQueue(make(chan bool), m.ChannelID)
 			return
 		}
 	}
@@ -384,7 +384,7 @@ func (vi *VoiceInstance) prepPlay(query string, s *discordgo.Session, m *discord
 				return
 			}
 			log.Println("PlayQueue is called.")
-			vi.PlayQueue(make(chan bool))
+			vi.PlayQueue(make(chan bool), m.ChannelID)
 			return
 		}
 	}
@@ -428,7 +428,7 @@ func (vi *VoiceInstance) processDownloadQueue(r chan<- int) {
 	close(r)
 }
 
-func (vi *VoiceInstance) PlayQueue(stop <-chan bool) {
+func (vi *VoiceInstance) PlayQueue(stop <-chan bool, messageChannelID string) {
 	// Send "speaking" packet over the voice websocket
 	err := vi.dgv.Speaking(true)
 	if err != nil {
@@ -480,6 +480,7 @@ func (vi *VoiceInstance) PlayQueue(stop <-chan bool) {
 
 		nextItemPath := strings.Trim(fmt.Sprintf("%v", nextItem), "[]")
 		log.Println("Next item: ", nextItemPath)
+		vi.sendNowPlayingToChannel(messageChannelID, nextItemPath)
 		vi.PlayAudioFile(nextItemPath, stop)
 	}
 }
@@ -666,4 +667,19 @@ func SendPCM(v *discordgo.VoiceConnection, pcm <-chan []int16) {
 		// send encoded opus data to the sendOpus channel
 		v.OpusSend <- opus
 	}
+}
+
+//sendMessageToChannel sends the text to channel that given id.
+func (vi *VoiceInstance) sendMessageToChannel(channelID, text string) {
+	_, err := vi.session.ChannelMessageSend(channelID, text)
+	if err != nil {
+		log.Printf("Error while sending message to channel: %v", err)
+	}
+	return
+}
+
+func (vi *VoiceInstance) sendNowPlayingToChannel(channelID, songTitle string) {
+	messageText := "Now Playing " + songTitle
+	vi.sendMessageToChannel(channelID, messageText)
+	return
 }
