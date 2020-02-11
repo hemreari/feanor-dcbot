@@ -128,6 +128,11 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 		vi.prepPlay(query, s, m)
 	}
+
+	//skip commands plays next song
+	if strings.Compare(m.Content, "!skip") == 0 {
+		vi.skipSong(m)
+	}
 }
 
 func (vi *VoiceInstance) prepPlay(query string, s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -156,7 +161,6 @@ func (vi *VoiceInstance) prepPlay(query string, s *discordgo.Session, m *discord
 	}
 
 	if vi.isPlaying == false {
-		log.Println("No song is playing.")
 		vi.downloadQueue.Put(query)
 	}
 
@@ -168,7 +172,6 @@ func (vi *VoiceInstance) prepPlay(query string, s *discordgo.Session, m *discord
 				fmt.Printf("Couldn't join the voice channel: %v\n", err)
 				return
 			}
-			log.Println("PlayQueue is called.")
 			vi.playQueueFunc(m.ChannelID)
 			return
 		}
@@ -182,6 +185,7 @@ func (vi *VoiceInstance) playQueueFunc(messageChannelID string) {
 	}
 
 	defer func() {
+		vi.dgv.Speaking(false)
 		vi.disconnectBot()
 	}()
 
@@ -203,13 +207,13 @@ func (vi *VoiceInstance) playQueueFunc(messageChannelID string) {
 		if vi.downloadQueue.Empty() {
 			playStat := <-chanPlayStat
 			log.Println("playStat:", playStat)
+			if playStat == 0 {
+				return
+			}
 		} else {
 			select {
 			case playStat := <-chanPlayStat:
 				log.Println("chanPlayStat: ", playStat)
-				if playStat == 0 {
-					return
-				}
 			default:
 				continue
 			}
@@ -259,6 +263,15 @@ func (vi *VoiceInstance) processPlayQueue(playStat chan<- int, messageChannelID 
 	vi.sendNowPlayingToChannel(messageChannelID, nextItemPath)
 	go vi.playAudioFile(nextItemPath, stop)
 	stat := <-stop
+
+	if stat == 0 || stat == 1 {
+		errDeleteFile := util.DeleteFile(nextItemPath)
+		if err != nil {
+			log.Println(errDeleteFile)
+		} else {
+			log.Printf("%s is deleted.", nextItemPath)
+		}
+	}
 	playStat <- stat
 }
 
@@ -286,13 +299,6 @@ func (vi *VoiceInstance) playAudioFile(filename string, stop chan<- int) {
 
 	go func() {
 		SendPCM(vi.dgv, send)
-		//song is played and there is left no song to play play queue is empty
-		//we can end the playing process.
-		if vi.playQueue.Empty() && vi.isPlaying == false {
-			err = run.Process.Kill()
-			stop <- 0
-			return
-		}
 	}()
 
 	for {
@@ -301,19 +307,43 @@ func (vi *VoiceInstance) playAudioFile(filename string, stop chan<- int) {
 		//song is played and there is still song to play in the play queue
 		if (err == io.EOF || err == io.ErrUnexpectedEOF) && !vi.playQueue.Empty() {
 			vi.isPlaying = false
-			errDeleteFile := util.DeleteFile(filename)
-			if errDeleteFile != nil {
-				log.Println(errDeleteFile)
-			} else {
-				log.Printf("%s is deleted.", filename)
-			}
 			stop <- 1
 		}
 
-		if err != nil {
+		//EOF received and play queue is empty means that
+		//song is played and there is left no song to play.
+		//we can end the play process by sending 0(int) to channel.
+		if (err == io.EOF || err == io.ErrUnexpectedEOF) && vi.playQueue.Empty() {
+			log.Println("EOF received and play queue is empty. Ending play process.")
+			err = run.Process.Kill()
+			stop <- 0
+			return
+		}
+
+		if (err != io.EOF && err != io.ErrUnexpectedEOF) && err != nil {
 			log.Println("Error reading from ffmpeg stdout: ", err)
 			stop <- -1
 			return
+		}
+
+		if vi.skip == true {
+			//if playqueue is not empty send 1(int) to the channel
+			//to play next song on the queue.
+			if vi.isPlaying == true && !vi.playQueue.Empty() {
+				vi.skip = false
+				err = run.Process.Kill()
+				stop <- 1
+				return
+			}
+
+			//if the song that now playing is last song on the queue
+			//means that there is left no song to play next so stop the
+			//play process by sending 0(int) to the channel.
+			if vi.isPlaying == true && vi.playQueue.Empty() {
+				vi.skip = false
+				stop <- 0
+				return
+			}
 		}
 
 		select {
@@ -372,6 +402,35 @@ func SendPCM(v *discordgo.VoiceConnection, pcm <-chan []int16) {
 		}
 		// send encoded opus data to the sendOpus channel
 		v.OpusSend <- opus
+	}
+}
+
+func (vi *VoiceInstance) skipSong(m *discordgo.MessageCreate) {
+	//if currently no song is playing, no need to skip it.
+	if vi.isPlaying == false {
+		log.Println("No song is playing. skip returning.")
+		return
+	}
+
+	c, err := vi.session.State.Channel(m.ChannelID)
+	if err != nil {
+		log.Printf("Couldn't find channel: %v\n", err)
+		// Could not find channel.
+		return
+	}
+
+	g, err := vi.session.Guild(c.GuildID)
+	if err != nil {
+		log.Printf("Couldn't find guild: %v\n", err)
+		// Could not find guild.
+		return
+	}
+	for _, vs := range g.VoiceStates {
+		if vs.UserID == m.Author.ID {
+			log.Println("setting skip to true")
+			vi.skip = true
+			return
+		}
 	}
 }
 
