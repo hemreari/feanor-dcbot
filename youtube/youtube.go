@@ -30,6 +30,8 @@ func NewYoutubeAPI(developerKey string) *YoutubeAPI {
 
 //GetVideoID searches given query on the youtube and returns
 //first video's ID and Title.
+//!!!! SOME SEARCH RESULTS ON YT DOESN'T RETURN ID. HANDLE ERROR.
+//FOR NOW I'M DOING IT ON func DownloadVideo.
 func (y *YoutubeAPI) GetVideoID(query string) *SearchResult {
 	developerKey := y.DeveloperKey
 
@@ -72,8 +74,11 @@ func DownloadVideo(searchResult *SearchResult) (string, error) {
 	videoTitle := searchResult.VideoTitle
 	videoPath := videoTitle + ".m4a"
 
-	log.Printf("Starting to download: %s\n", videoTitle)
+	if searchResult.VideoID == "" {
+		return "", fmt.Errorf("Coulnd't get a video ID.")
+	}
 
+	log.Printf("Starting to download: %s\n", videoTitle)
 	log.Println("video ID: ", searchResult.VideoID)
 
 	ytdlArgs := []string{

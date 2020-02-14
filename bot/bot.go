@@ -133,17 +133,14 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if strings.Compare(m.Content, "!skip") == 0 {
 		vi.skipSong(m)
 	}
+
+	if strings.Compare(m.Content, "!show") == 0 {
+		log.Println("Download Queue: ", vi.downloadQueue)
+		log.Println("Play Queue: ", vi.playQueue)
+	}
 }
 
 func (vi *VoiceInstance) prepPlay(query string, s *discordgo.Session, m *discordgo.MessageCreate) {
-	if vi.isPlaying == true {
-		log.Println("Song is playing, putting download queue and returning.")
-		vi.downloadQueue.Put(query)
-		chanDownloadStat := make(chan int)
-		go vi.processDownloadQueue(chanDownloadStat)
-		return
-	}
-
 	// Find the channel that the message came from.
 	c, err := s.State.Channel(m.ChannelID)
 	if err != nil {
@@ -161,7 +158,18 @@ func (vi *VoiceInstance) prepPlay(query string, s *discordgo.Session, m *discord
 	}
 
 	if vi.isPlaying == false {
+		err = vi.downloadQuery(query, m.ChannelID)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+	}
+
+	if vi.isPlaying == true {
 		vi.downloadQueue.Put(query)
+		chanDownloadStat := make(chan int)
+		go vi.processDownloadQueue(chanDownloadStat, m.ChannelID)
+		return
 	}
 
 	for _, vs := range g.VoiceStates {
@@ -185,19 +193,20 @@ func (vi *VoiceInstance) playQueueFunc(messageChannelID string) {
 	}
 
 	defer func() {
-		vi.dgv.Speaking(false)
 		vi.disconnectBot()
 	}()
 
 	chanDownloadStat := make(chan int)
 	chanPlayStat := make(chan int)
-	downloadStat := -5
 	for {
 		if !vi.downloadQueue.Empty() {
-			go vi.processDownloadQueue(chanDownloadStat)
-			downloadStat = <-chanDownloadStat
+			go vi.processDownloadQueue(chanDownloadStat, messageChannelID)
+			downloadStat := <-chanDownloadStat
 			//handle downloadstat -1 and -2 status.
 			log.Println("chanDownloadStat: ", downloadStat)
+			if downloadStat == -2 || downloadStat == -1 {
+				continue
+			}
 		}
 
 		//first song download is finished. we can proceed to
@@ -221,10 +230,10 @@ func (vi *VoiceInstance) playQueueFunc(messageChannelID string) {
 	}
 }
 
-func (vi *VoiceInstance) processDownloadQueue(r chan<- int) {
+func (vi *VoiceInstance) processDownloadQueue(r chan<- int, channelID string) {
 	if vi.downloadQueue.Empty() {
 		log.Println("Download queue is empty. Closing the channel")
-		close(r)
+		r <- 1
 		return
 	}
 
@@ -240,7 +249,8 @@ func (vi *VoiceInstance) processDownloadQueue(r chan<- int) {
 	songPath, err := yt.SearchDownload(query)
 	if err != nil {
 		log.Println(err)
-		log.Printf("Putting %s to the error queue.")
+		log.Printf("Putting %s to the error queue.", query)
+		vi.sendMessageToChannel(channelID, "Query is insufficient to find a result. Try again.")
 		vi.errQueue.Put(nextQuery)
 		r <- -1
 		return
@@ -249,6 +259,19 @@ func (vi *VoiceInstance) processDownloadQueue(r chan<- int) {
 	vi.playQueue.Put(songPath)
 	r <- 1
 	return
+}
+
+func (vi *VoiceInstance) downloadQuery(query, channelID string) error {
+	songPath, err := yt.SearchDownload(query)
+	if err != nil {
+		vi.sendMessageToChannel(channelID, "Query is insufficient to find a result. Try again.")
+		log.Printf("Putting %s to the error queue.", query)
+		vi.errQueue.Put(query)
+		return err
+	}
+
+	vi.playQueue.Put(songPath)
+	return nil
 }
 
 func (vi *VoiceInstance) processPlayQueue(playStat chan<- int, messageChannelID string) {
@@ -326,6 +349,7 @@ func (vi *VoiceInstance) playAudioFile(filename string, stop chan<- int) {
 			return
 		}
 
+		//handle skip
 		if vi.skip == true {
 			//if playqueue is not empty send 1(int) to the channel
 			//to play next song on the queue.
@@ -427,7 +451,6 @@ func (vi *VoiceInstance) skipSong(m *discordgo.MessageCreate) {
 	}
 	for _, vs := range g.VoiceStates {
 		if vs.UserID == m.Author.ID {
-			log.Println("setting skip to true")
 			vi.skip = true
 			return
 		}
