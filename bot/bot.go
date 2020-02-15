@@ -15,7 +15,7 @@ import (
 	"syscall"
 
 	"../config"
-	//"../spotify"
+	"../spotify"
 	"../util"
 	"../youtube"
 
@@ -132,6 +132,11 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	//skip commands plays next song
 	if strings.Compare(m.Content, "!skip") == 0 {
 		vi.skipSong(m)
+	}
+
+	//stop commands stops playing song
+	if strings.Compare(m.Content, "!stop") == 0 {
+		vi.stopSong(m)
 	}
 
 	if strings.Compare(m.Content, "!show") == 0 {
@@ -349,7 +354,7 @@ func (vi *VoiceInstance) playAudioFile(filename string, stop chan<- int) {
 			return
 		}
 
-		//handle skip
+		//handle !skip
 		if vi.skip == true {
 			//if playqueue is not empty send 1(int) to the channel
 			//to play next song on the queue.
@@ -368,6 +373,15 @@ func (vi *VoiceInstance) playAudioFile(filename string, stop chan<- int) {
 				stop <- 0
 				return
 			}
+		}
+
+		//handle !stop
+		if vi.stop == true {
+			vi.stop = false
+			err = run.Process.Kill()
+			vi.playQueue = clearPlaylistQueue(vi.playQueue)
+			stop <- 0
+			return
 		}
 
 		select {
@@ -457,6 +471,34 @@ func (vi *VoiceInstance) skipSong(m *discordgo.MessageCreate) {
 	}
 }
 
+func (vi *VoiceInstance) stopSong(m *discordgo.MessageCreate) {
+	//if currently no song is playing, no need to stop it.
+	if vi.isPlaying == false {
+		log.Println("No song is playing. stop returning.")
+		return
+	}
+
+	c, err := vi.session.State.Channel(m.ChannelID)
+	if err != nil {
+		log.Printf("Couldn't find channel: %v\n", err)
+		// Could not find channel.
+		return
+	}
+
+	g, err := vi.session.Guild(c.GuildID)
+	if err != nil {
+		log.Printf("Couldn't find guild: %v\n", err)
+		// Could not find guild.
+		return
+	}
+	for _, vs := range g.VoiceStates {
+		if vs.UserID == m.Author.ID {
+			vi.stop = true
+			return
+		}
+	}
+}
+
 //sendMessageToChannel sends the text to channel that given id.
 func (vi *VoiceInstance) sendMessageToChannel(channelID, text string) {
 	_, err := vi.session.ChannelMessageSend(channelID, text)
@@ -478,4 +520,24 @@ func (vi *VoiceInstance) sendNowPlayingToChannel(channelID, songTitle string) {
 func createNewQueue() *queue.Queue {
 	newQueue := queue.New(20)
 	return newQueue
+}
+
+func clearPlaylistQueue(playlistQueue *queue.Queue) *queue.Queue {
+	for !playlistQueue.Empty() {
+		nextItem, err := playlistQueue.Get(1)
+		if err != nil {
+			log.Printf("Error while getting item from playlist: %v", err)
+			return createNewQueue()
+		}
+
+		nextItemPath := strings.Trim(fmt.Sprintf("%v", nextItem), "[]")
+		util.DeleteFile(nextItemPath)
+	}
+	if playlistQueue.Empty() {
+		log.Println("All files has been deleted and Play Queue cleared.")
+		return playlistQueue
+	} else {
+		log.Printf("Creating new playlist queue.")
+		return createNewQueue()
+	}
 }
