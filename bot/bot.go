@@ -42,11 +42,6 @@ type VoiceInstance struct {
 	errQueue      *queue.Queue
 }
 
-type SongInfo struct {
-	Title string
-	Path  string
-}
-
 var (
 	speakers    map[uint32]*gopus.Decoder
 	opusEncoder *gopus.Encoder
@@ -94,81 +89,16 @@ func InitBot(botToken string, ytAPI *youtube.YoutubeAPI, config *config.Config) 
 	<-sc
 
 	dg.Close()
-
 	return nil
+}
+
+func initSpotifyAPI() *spotify.SpotifyAPI {
+	spotifyAPI := spotify.NewSpotifyAPI(cfg.Spotify.ClientID, cfg.Spotify.ClientSecretID)
+	return spotifyAPI
 }
 
 func ready(s *discordgo.Session, event *discordgo.Ready) {
 	s.UpdateStatus(0, "Valinor'dan sevgiler.")
-}
-
-func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
-	// Ignore all messages created by the bot itself
-	// This isn't required in this specific example but it's a good practice.
-	if m.Author.ID == s.State.User.ID {
-		return
-	}
-
-	/*
-		if strings.Contains(m.Content, "!feanor") {
-		}
-	*/
-
-	//show command prints current playlist.
-	if strings.HasPrefix(m.Content, "!show") {
-		vi.displayPlaylist(m)
-	}
-
-	//skip commands plays next song
-	if strings.Compare(m.Content, "!skip") == 0 {
-		vi.SkipSong()
-	}
-
-	//play commands searchs after !play command
-	//and plays the first result.
-	if strings.HasPrefix(m.Content, "!play") {
-		query := strings.Trim(m.Content, "!play")
-		if query == "" {
-			return
-		}
-		vi.prepPlay(query, s, m)
-	}
-
-	//stop commands stops music if any music is playing
-	if strings.Compare(m.Content, "!stop") == 0 {
-		if vi.isPlaying == false {
-			return
-		}
-
-		c, err := s.State.Channel(m.ChannelID)
-		if err != nil {
-			log.Printf("Couldn't find channel: %v\n", err)
-			// Could not find channel.
-			return
-		}
-
-		// Find the guild for that channel.
-		g, err := s.State.Guild(c.GuildID)
-		if err != nil {
-			log.Printf("Couldn't find guild: %v\n", err)
-			// Could not find guild.
-			return
-		}
-
-		for _, vs := range g.VoiceStates {
-			if vs.UserID == m.Author.ID {
-				vi.StopMusic()
-			}
-		}
-	}
-
-	if strings.HasPrefix(m.Content, "playlist!") {
-		link := strings.Trim(m.Content, "playlist!")
-		if strings.Contains(link, "spotify") {
-			playlistID := util.GetSpotifyPlaylistID(link)
-			vi.prepSpotifyPlaylist(playlistID, s, m)
-		}
-	}
 }
 
 // This function will be called (due to AddHandler above) every time a new
@@ -187,46 +117,53 @@ func guildCreate(s *discordgo.Session, event *discordgo.GuildCreate) {
 	}
 }
 
-func (vi *VoiceInstance) StopMusic() {
-	vi.stop = true
-	vi.isPlaying = false
-}
-
-func (vi *VoiceInstance) SkipSong() {
-	vi.skip = true
-}
-
-//prepSpotifyPlaylist clears the current queue and inserts all
-//the songs that present in the given spotify playlist and
-//plays this queue.
-func (vi *VoiceInstance) prepSpotifyPlaylist(playlistID string, s *discordgo.Session,
-	m *discordgo.MessageCreate) {
-	spotifyAPI := initSpotifyAPI()
-
-	//get playlist owner
-	sptfyPlaylistInfo, err := spotifyAPI.GetPlaylist(playlistID)
-	if err != nil {
-		log.Printf("Error while getting Spotify playlist information: %v", err)
+func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
+	// Ignore all messages created by the bot itself
+	// This isn't required in this specific example but it's a good practice.
+	if m.Author.ID == s.State.User.ID {
+		return
 	}
 
-	log.Println("Playlist Name: ", sptfyPlaylistInfo.Name)
-	log.Println("Playlist Owner: ", sptfyPlaylistInfo.Owner.ID)
-
-	//get playlist tracks
-	//sptfyTracks, err := spotifyAPI.GetTracksFromPlaylist(playlistID)
-	_, err = spotifyAPI.GetTracksFromPlaylist(playlistID)
-	if err != nil {
-		log.Printf("Error while getting Spotify playlist tracks: %v", err)
+	//play commands searchs after !play command
+	//and plays the first result.
+	if strings.HasPrefix(m.Content, "!play") {
+		query := strings.Trim(m.Content, "!play")
+		if query == "" {
+			return
+		}
+		vi.prepPlay(query, s, m)
 	}
 
-	vi.playQueue = clearPlaylistQueue(vi.playQueue)
+	//skip commands plays next song
+	if strings.Compare(m.Content, "!skip") == 0 {
+		vi.skipSong(m)
+	}
 
-	// Find the channel that the message came from.
+	//stop commands stops playing song
+	if strings.Compare(m.Content, "!stop") == 0 {
+		vi.stopSong(m)
+	}
+
+	if strings.Compare(m.Content, "!show") == 0 {
+		log.Println("Download Queue: ", vi.downloadQueue)
+		log.Println("Play Queue: ", vi.playQueue)
+	}
+
+	if strings.HasPrefix(m.Content, "!list") {
+		link := strings.Trim(m.Content, "!list ")
+		if strings.Contains(link, "spotify") {
+			playlistID := util.GetSpotifyPlaylistID(link)
+			vi.prepSpotifyPlaylist(playlistID, s, m)
+		}
+	}
+}
+
+func (vi *VoiceInstance) validateMessage(s *discordgo.Session, m *discordgo.MessageCreate) bool {
 	c, err := s.State.Channel(m.ChannelID)
 	if err != nil {
 		log.Printf("Couldn't find channel: %v\n", err)
 		// Could not find channel.
-		return
+		return false
 	}
 
 	// Find the guild for that channel.
@@ -234,30 +171,62 @@ func (vi *VoiceInstance) prepSpotifyPlaylist(playlistID string, s *discordgo.Ses
 	if err != nil {
 		log.Printf("Couldn't find guild: %v\n", err)
 		// Could not find guild.
-		return
+		return false
 	}
 
-	// Look for the message sender in that guild's current voice states.
 	for _, vs := range g.VoiceStates {
 		if vs.UserID == m.Author.ID {
 			dgv, err := s.ChannelVoiceJoin(g.ID, vs.ChannelID, false, true)
 			vi.dgv = dgv
 			if err != nil {
 				fmt.Printf("Couldn't join the voice channel: %v\n", err)
-				return
+				return false
 			}
-			vi.PlayQueue(make(chan bool), m.ChannelID)
-			return
+			return true
 		}
 	}
+	return false
 }
 
-/*
-func insertSongsToQueue(spotifyPlaylistTracks *spotify.SpotifyPlaylistTracks) queue.Queue {
-	downloadSongChan := make(chan string)
+//prepSpotifyPlaylist gets songs from the given Spotify playlist ID
+//and parses them as youtube queries to add to the download queue.
+//finally starts the play process.
+func (vi *VoiceInstance) prepSpotifyPlaylist(playlistID string, s *discordgo.Session, m *discordgo.MessageCreate) {
+	if !vi.validateMessage(s, m) {
+		log.Println("message is not valid to join the voice channel.")
+		return
+	}
+
+	//initialise spotify api.
+	spotifyAPI := initSpotifyAPI()
+
+	//get playlist info from spotify api.
+	sptfyPlaylistInfo, err := spotifyAPI.GetPlaylist(playlistID)
+	if err != nil {
+		log.Printf("Error while getting Spotify playlist information: %v", err)
+		vi.sendMessageToChannel(m.ChannelID, "Unexpected thing is happened. Please, Try again.")
+		return
+	}
+
+	log.Println("Playlist Name: ", sptfyPlaylistInfo.Name)
+	log.Println("Playlist Owner: ", sptfyPlaylistInfo.Owner.ID)
+
+	//get playlist tracks
+	plTracks, err := spotifyAPI.GetTracksFromPlaylist(playlistID)
+	if err != nil {
+		log.Printf("Error while getting Spotify playlist tracks: %v", err)
+		vi.sendMessageToChannel(m.ChannelID, "Unexpected thing is happened. Please, Try again.")
+		return
+	}
+
+	//when !list command is received stop the play process
+	//if bot has on going play job.
+	if vi.isPlaying == true {
+		vi.stopSong(m)
+	}
+
 	//parse playlist tracks to artist and track name.
-	items := spotifyPlaylistTracks.Items
-	count := 0
+	items := plTracks.Items
 	for index := range items {
 		trackName := items[index].Track.Name
 
@@ -266,91 +235,23 @@ func insertSongsToQueue(spotifyPlaylistTracks *spotify.SpotifyPlaylistTracks) qu
 		for artistIndex := range artists {
 			artistsName += artists[artistIndex].Name
 		}
-		ytQuery := artistsName + trackName
 
-		//dont start goroutine until first song is
-		//download.
-		if count > 1 {
-			go func() {
-				videoPath, err := yt.SearchDownload(ytQuery)
-				if err != nil {
-					log.Println(err)
-					count++
-					//continue
-				}
-			}()
-		} else {
-			videoPath, err := yt.SearchDownload(ytQuery)
-			if err != nil {
-				log.Println(err)
-				count++
-				//continue
-			}
+		ytQuery := artistsName + " " + trackName
+
+		//first query is not putting in to the download query
+		//it's directly downloading.
+		if vi.playQueue.Empty() {
+			_ = vi.downloadQuery(ytQuery, m.ChannelID)
+			continue
 		}
-		//this part could be done concurrent.
-		//and should be done.
-
-		vi.playQueue.Put(videoPath)
-		count++
-	}
-	return vi.playQueue
-}
-*/
-
-//initSpotifyAPI returns the required struct to use Spotify
-//endpoint functions.
-func initSpotifyAPI() *spotify.SpotifyAPI {
-	spotifyAPI := spotify.NewSpotifyAPI(cfg.Spotify.ClientID, cfg.Spotify.ClientSecretID)
-	return spotifyAPI
-}
-
-/*
-func processDownloadQueue() <-chan int {
-	out := make(chan int)
-	for !vi.downloadQueue.Empty() {
-		go func() {
-			nextItem, err := vi.downloadQueue.Get(1)
-			if err != nil {
-				log.Println(err)
-				continue
-			}
-			songPath, err := yt.SearchDownload(nextItem)
-			if err != nil {
-				log.Println(err)
-				continue
-			}
-
-			vi.playlist.Put(songPath)
-			out <- 1
-		}()
+		vi.downloadQueue.Put(ytQuery)
 	}
 
-	if vi.downloadQueue.Empty() {
-		out <- 0
-	}
+	//start the play process.
+	vi.playQueueFunc(m.ChannelID)
 }
-*/
 
-//!!!!!
 func (vi *VoiceInstance) prepPlay(query string, s *discordgo.Session, m *discordgo.MessageCreate) {
-	/*
-		if vi.isPlaying == true && !vi.playQueue.Empty() {
-			vi.downloadQueue.Put(query)
-			return
-		}
-
-		if vi.isPlaying == true && vi.playQueue.Empty() {
-			vi.downloadQueue.Put(query)
-			return
-		}
-	*/
-
-	if vi.isPlaying == true {
-		log.Println("Song is playing, putting download queue and returning.")
-		vi.downloadQueue.Put(query)
-		return
-	}
-
 	// Find the channel that the message came from.
 	c, err := s.State.Channel(m.ChannelID)
 	if err != nil {
@@ -367,14 +268,20 @@ func (vi *VoiceInstance) prepPlay(query string, s *discordgo.Session, m *discord
 		return
 	}
 
-	//if playlist queue is empty, put first
-	//item and play the playlist
 	if vi.isPlaying == false {
-		log.Println("No song is playing.")
-		vi.downloadQueue.Put(query)
+		err = vi.downloadQuery(query, m.ChannelID)
+		if err != nil {
+			log.Println(err)
+			return
+		}
 	}
 
-	// Look for the message sender in that guild's current voice states.
+	if vi.isPlaying == true {
+		vi.downloadQueue.Put(query)
+		go vi.processDownloadQueue(m.ChannelID)
+		return
+	}
+
 	for _, vs := range g.VoiceStates {
 		if vs.UserID == m.Author.ID {
 			dgv, err := s.ChannelVoiceJoin(g.ID, vs.ChannelID, false, true)
@@ -383,196 +290,214 @@ func (vi *VoiceInstance) prepPlay(query string, s *discordgo.Session, m *discord
 				fmt.Printf("Couldn't join the voice channel: %v\n", err)
 				return
 			}
-			log.Println("PlayQueue is called.")
-			vi.PlayQueue(make(chan bool), m.ChannelID)
+			vi.playQueueFunc(m.ChannelID)
 			return
 		}
 	}
 }
 
-//processDownloadQueue is concurrent function that downloads multiple
-//songs  simultaneously. When the first song in the download queue is
-//downloaded writing 1(integer) to the channel. Writing 1 is important because
-//this way we can start to play queue without waiting to finish all downloads.
-//When all songs in the queue is downloaded (means that download queue is empty)
-//writing 0 to the channel.
-func (vi *VoiceInstance) processDownloadQueue(r chan<- int) {
-	if vi.downloadQueue.Empty() {
-		log.Println("Download queue is empty. Closing the channel")
-		r <- 0
-		close(r)
-	}
-
-	nextQuery, err := vi.downloadQueue.Get(1)
-	if err != nil {
-		log.Println(err)
-		r <- -2
-		close(r)
-	}
-
-	log.Println("nextQuery: ", nextQuery)
-
-	query := strings.Trim(fmt.Sprintf("%v", nextQuery), "[]")
-
-	songPath, err := yt.SearchDownload(query)
-	if err != nil {
-		log.Println(err)
-		log.Printf("Putting %s to the error queue.")
-		vi.errQueue.Put(nextQuery)
-		r <- -1
-		close(r)
-	}
-
-	vi.playQueue.Put(songPath)
-	r <- 1
-	close(r)
-}
-
-func (vi *VoiceInstance) PlayQueue(stop <-chan bool, messageChannelID string) {
-	// Send "speaking" packet over the voice websocket
+func (vi *VoiceInstance) playQueueFunc(channelID string) {
 	err := vi.dgv.Speaking(true)
 	if err != nil {
 		log.Println("Couldn't set speaking", err)
 	}
 
 	defer func() {
-		err := vi.dgv.Speaking(false)
-		if err != nil {
-			log.Println("Couldn't stop speaking", err)
-		}
-		vi.dgv.Disconnect()
-		log.Printf("Bot disconnected from the voice channel.\n")
-		vi.stop = false
-		vi.isPlaying = false
+		vi.disconnectBot()
 	}()
 
-	queueDownloadStatus := make(chan int)
-	for !vi.downloadQueue.Empty() {
-		log.Println("Download is queue is not empty.")
-		log.Println("Download queue: ", vi.downloadQueue)
-		go vi.processDownloadQueue(queueDownloadStatus)
-
-		stat := <-queueDownloadStatus
-		log.Println("stat: ", stat)
-		if stat == 0 {
-			break
-		}
-		if stat == 1 {
-			continue
-		}
-	}
-
-	//check playlist queue empty or not
-	if vi.playQueue.Empty() {
-		log.Printf("Playlist is empty, quiting.\n")
-		return
-	}
-
-	//if playlist is not empty, retrieve first item
-	//from the queue and play it.
-	vi.isPlaying = true
-	for !vi.playQueue.Empty() {
-		nextItem, err := vi.playQueue.Get(1)
-		if err != nil {
-			log.Printf("Error while getting item from playlist: %v", err)
-			return
+	chanPlayStat := make(chan int)
+	for {
+		if !vi.downloadQueue.Empty() {
+			go vi.processDownloadQueue(channelID)
 		}
 
-		nextItemPath := strings.Trim(fmt.Sprintf("%v", nextItem), "[]")
-		log.Println("Next item: ", nextItemPath)
-		vi.sendNowPlayingToChannel(messageChannelID, nextItemPath)
-		vi.PlayAudioFile(nextItemPath, stop)
+		//isPlaying is false means that bot is not  playing any song
+		//at the moment and play queue is empty so we can call processPlayQueue
+		//function to play a song from the play queue.
+		//I added isPlaying condition to prevent calling other processPlayQueue
+		//goroutinues that causes playing multiple song simultaneously.
+		if vi.isPlaying == false && !vi.playQueue.Empty() {
+			vi.isPlaying = true
+			go vi.processPlayQueue(chanPlayStat, channelID)
+		}
+		//if download queue is empty, there is no other jobs to run
+		//we can just wait to end the play job.
+		if vi.downloadQueue.Empty() {
+			playStat := <-chanPlayStat
+			log.Println("playStat:", playStat)
+			if playStat == 0 {
+				vi.sendMessageToChannel(channelID, "See you later.")
+				return
+			}
+		} else {
+			select {
+			case playStat := <-chanPlayStat:
+				log.Println("chanPlayStat: ", playStat)
+			default:
+				continue
+			}
+		}
 	}
 }
 
-// PlayAudioFile will play the given filename to the already connected
-// Discord voice server/channel.  voice websocket and udp socket
-// must already be setup before this will work.
-func (vi *VoiceInstance) PlayAudioFile(filename string, stop <-chan bool) {
+//processDownloadQueue had channel to keep track of the download status
+//of songs but I think this not necessary anymore so I removed channel.
+//With the latest changes processDownloadQueue and downloadQuery functions
+//seems like doing the same jobs. I am planning to combine this two functions
+//in to one.
+func (vi *VoiceInstance) processDownloadQueue(channelID string) {
+	if vi.downloadQueue.Empty() {
+		log.Println("Download queue is empty. Closing the channel")
+		return
+	}
+
+	nextQuery, err := vi.downloadQueue.Get(1)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	query := strings.Trim(fmt.Sprintf("%v", nextQuery), "[]")
+
+	songPath, err := yt.SearchDownload(query)
+	if err != nil {
+		log.Println(err)
+		log.Printf("Putting %s to the error queue.", query)
+		vi.sendMessageToChannel(channelID, "Query is insufficient to find a result. Try again.")
+		vi.errQueue.Put(nextQuery)
+		return
+	}
+
+	vi.playQueue.Put(songPath)
+	return
+}
+
+//vide supra processDownloadQueue function comment.
+func (vi *VoiceInstance) downloadQuery(query, channelID string) error {
+	songPath, err := yt.SearchDownload(query)
+	if err != nil {
+		vi.sendMessageToChannel(channelID, "Query is insufficient to find a result. Try again.")
+		log.Printf("Putting %s to the error queue.", query)
+		vi.errQueue.Put(query)
+		return err
+	}
+
+	vi.playQueue.Put(songPath)
+	return nil
+}
+
+func (vi *VoiceInstance) processPlayQueue(playStat chan<- int, messageChannelID string) {
+	stop := make(chan int)
+	nextItem, err := vi.playQueue.Get(1)
+	if err != nil {
+		log.Printf("Error while getting item from playlist: %v", err)
+		return
+	}
+
+	nextItemPath := strings.Trim(fmt.Sprintf("%v", nextItem), "[]")
+	vi.sendNowPlayingToChannel(messageChannelID, nextItemPath)
+	go vi.playAudioFile(nextItemPath, stop)
+	stat := <-stop
+
+	if stat == 0 || stat == 1 {
+		errDeleteFile := util.DeleteFile(nextItemPath)
+		if err != nil {
+			log.Println(errDeleteFile)
+		} else {
+			log.Printf("%s is deleted.", nextItemPath)
+		}
+	}
+	playStat <- stat
+}
+
+func (vi *VoiceInstance) playAudioFile(filename string, stop chan<- int) {
 	// Create a shell command "object" to run.
 	run := exec.Command("ffmpeg", "-i", filename, "-f", "s16le", "-ar",
 		strconv.Itoa(frameRate), "-ac", strconv.Itoa(channels), "pipe:1")
 	ffmpegout, err := run.StdoutPipe()
 	if err != nil {
 		log.Println("StdoutPipe Error:", err)
+		stop <- -1
 		return
 	}
 
 	ffmpegbuf := bufio.NewReaderSize(ffmpegout, 16384)
-
 	// Starts the ffmpeg command
 	err = run.Start()
 	if err != nil {
 		log.Println("RunStart Error", err)
+		stop <- -1
 		return
 	}
 
-	go func() {
-		<-stop
-		err = run.Process.Kill()
-	}()
-
-	// Send not "speaking" packet over the websocket when we finish
-	defer func() {
-		err := util.DeleteFile(filename)
-		if err != nil {
-			log.Println(err)
-		} else {
-			log.Printf("%s is deleted\n", filename)
-		}
-	}()
-
 	send := make(chan []int16, 2)
-	defer close(send)
 
-	close := make(chan bool)
 	go func() {
 		SendPCM(vi.dgv, send)
-		close <- true
 	}()
 
-	log.Printf("Now playing %s.\n", filename)
-
 	for {
-		// read data from ffmpeg stdout
 		audiobuf := make([]int16, frameSize*channels)
 		err = binary.Read(ffmpegbuf, binary.LittleEndian, &audiobuf)
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			return
-		}
-		if err != nil {
-			log.Println("error reading from ffmpeg stdout", err)
+		//song is played and there is still song to play in the play queue
+		if (err == io.EOF || err == io.ErrUnexpectedEOF) && !vi.playQueue.Empty() {
+			vi.isPlaying = false
+			stop <- 1
 			return
 		}
 
-		if vi.skip == true {
+		//EOF received and play queue is empty means that
+		//song is played and there is left no song to play.
+		//we can end the play process by sending 0(int) to channel.
+		if (err == io.EOF || err == io.ErrUnexpectedEOF) && vi.playQueue.Empty() {
+			log.Println("EOF received and play queue is empty. Ending play process.")
+			vi.isPlaying = false
 			err = run.Process.Kill()
-			if err != nil {
-				log.Printf("Error while killing process: %v", err)
+			stop <- 0
+			return
+		}
+
+		if (err != io.EOF && err != io.ErrUnexpectedEOF) && err != nil {
+			log.Println("Error reading from ffmpeg stdout: ", err)
+			stop <- -1
+			return
+		}
+
+		//handle !skip
+		if vi.skip == true {
+			//if playqueue is not empty send 1(int) to the channel
+			//to play next song on the queue.
+			if vi.isPlaying == true && !vi.playQueue.Empty() {
+				vi.skip = false
+				err = run.Process.Kill()
+				stop <- 1
 			}
-			vi.skip = false
-			return
+
+			//if the song that now playing is last song on the queue
+			//means that there is left no song to play next so stop the
+			//play process by sending 0(int) to the channel.
+			if vi.isPlaying == true && vi.playQueue.Empty() {
+				vi.skip = false
+				stop <- 0
+				return
+			}
 		}
 
+		//handle !stop
 		if vi.stop == true {
-			vi.clearQueueStopBot()
+			vi.stop = false
+			err = run.Process.Kill()
+			vi.downloadQueue = createNewQueue()
+			vi.playQueue = clearPlaylistQueue(vi.playQueue)
+			stop <- 0
 			return
 		}
 
-		// Send received PCM to the sendPCM channel
 		select {
 		case send <- audiobuf:
-		case <-close:
-			return
 		}
 	}
-}
-
-//clearQueueStopBot clears current playlist queue and
-//removes bot from the voice channel.
-func (vi *VoiceInstance) clearQueueStopBot() {
-	vi.playQueue = clearPlaylistQueue(vi.playQueue)
-	vi.disconnectBot()
 }
 
 //disconnectBot disconnects bot from the voice channel
@@ -588,45 +513,6 @@ func (vi *VoiceInstance) disconnectBot() {
 	return
 }
 
-//clearPlaylistQueue removes all items in the queue
-//and deletes all downloaded files.
-//if queue cleaning process is successfull returns empty
-//queue if it is not returns newly created queue.
-
-//TODO: check whether queue path is present or not
-//in the working dir.
-func clearPlaylistQueue(playlistQueue *queue.Queue) *queue.Queue {
-	for !playlistQueue.Empty() {
-		nextItem, err := playlistQueue.Get(1)
-		if err != nil {
-			log.Printf("Error while getting item from playlist: %v", err)
-			return createNewQueue()
-		}
-
-		nextItemPath := strings.Trim(fmt.Sprintf("%v", nextItem), "[]")
-		util.DeleteFile(nextItemPath)
-	}
-	if playlistQueue.Empty() {
-		log.Println("All files has been deleted and Queue cleared.")
-		return playlistQueue
-	} else {
-		log.Printf("Creating new playlist queue.")
-		return createNewQueue()
-	}
-}
-
-//createNewQueue create new playlist queue and
-//returns newly created queue.
-func createNewQueue() *queue.Queue {
-	newQueue := queue.New(20)
-	return newQueue
-}
-
-func (vi *VoiceInstance) displayPlaylist(m *discordgo.MessageCreate) error {
-	log.Println("playlist:", vi.playQueue)
-	return nil
-}
-
 // SendPCM will receive on the provied channel encode
 // received PCM data into Opus then send that to Discordgo
 func SendPCM(v *discordgo.VoiceConnection, pcm <-chan []int16) {
@@ -637,14 +523,12 @@ func SendPCM(v *discordgo.VoiceConnection, pcm <-chan []int16) {
 	var err error
 
 	opusEncoder, err = gopus.NewEncoder(frameRate, channels, gopus.Audio)
-
 	if err != nil {
 		log.Println("NewEncoder Error", err)
 		return
 	}
 
 	for {
-
 		// read pcm from chan, exit if channel is closed.
 		recv, ok := <-pcm
 		if !ok {
@@ -669,6 +553,62 @@ func SendPCM(v *discordgo.VoiceConnection, pcm <-chan []int16) {
 	}
 }
 
+func (vi *VoiceInstance) skipSong(m *discordgo.MessageCreate) {
+	//if currently no song is playing, no need to skip it.
+	if vi.isPlaying == false {
+		log.Println("No song is playing. skip returning.")
+		return
+	}
+
+	c, err := vi.session.State.Channel(m.ChannelID)
+	if err != nil {
+		log.Printf("Couldn't find channel: %v\n", err)
+		// Could not find channel.
+		return
+	}
+
+	g, err := vi.session.Guild(c.GuildID)
+	if err != nil {
+		log.Printf("Couldn't find guild: %v\n", err)
+		// Could not find guild.
+		return
+	}
+	for _, vs := range g.VoiceStates {
+		if vs.UserID == m.Author.ID {
+			vi.skip = true
+			return
+		}
+	}
+}
+
+func (vi *VoiceInstance) stopSong(m *discordgo.MessageCreate) {
+	//if currently no song is playing, no need to stop it.
+	if vi.isPlaying == false {
+		log.Println("No song is playing. stop returning.")
+		return
+	}
+
+	c, err := vi.session.State.Channel(m.ChannelID)
+	if err != nil {
+		log.Printf("Couldn't find channel: %v\n", err)
+		// Could not find channel.
+		return
+	}
+
+	g, err := vi.session.Guild(c.GuildID)
+	if err != nil {
+		log.Printf("Couldn't find guild: %v\n", err)
+		// Could not find guild.
+		return
+	}
+	for _, vs := range g.VoiceStates {
+		if vs.UserID == m.Author.ID {
+			vi.stop = true
+			return
+		}
+	}
+}
+
 //sendMessageToChannel sends the text to channel that given id.
 func (vi *VoiceInstance) sendMessageToChannel(channelID, text string) {
 	_, err := vi.session.ChannelMessageSend(channelID, text)
@@ -678,8 +618,38 @@ func (vi *VoiceInstance) sendMessageToChannel(channelID, text string) {
 	return
 }
 
+//sendNowPlayingToChannel sends the playing song name message to channel.
 func (vi *VoiceInstance) sendNowPlayingToChannel(channelID, songTitle string) {
 	messageText := "Now Playing " + songTitle
 	vi.sendMessageToChannel(channelID, messageText)
 	return
+}
+
+//createNewQueue creates new queue and
+//returns newly created queue.
+func createNewQueue() *queue.Queue {
+	newQueue := queue.New(20)
+	return newQueue
+}
+
+//clearPlaylistQueue deletes all the song files that are present in
+//the play queue.
+func clearPlaylistQueue(playlistQueue *queue.Queue) *queue.Queue {
+	for !playlistQueue.Empty() {
+		nextItem, err := playlistQueue.Get(1)
+		if err != nil {
+			log.Printf("Error while getting item from playlist: %v", err)
+			return createNewQueue()
+		}
+
+		nextItemPath := strings.Trim(fmt.Sprintf("%v", nextItem), "[]")
+		util.DeleteFile(nextItemPath)
+	}
+	if playlistQueue.Empty() {
+		log.Println("All files has been deleted and Play Queue cleared.")
+		return playlistQueue
+	} else {
+		log.Printf("Creating new playlist queue.")
+		return createNewQueue()
+	}
 }

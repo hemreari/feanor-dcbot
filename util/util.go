@@ -34,7 +34,19 @@ func DeleteFile(path string) error {
 //from the given url
 //TODO: Error checking
 func GetSpotifyPlaylistID(url string) string {
-	return strings.Split(url, ":")[2]
+	//format 1: spotify:playlist:76tzi26o8O920CYAvVbeYO
+	if strings.HasPrefix(url, "spotify") {
+		return strings.Trim(strings.Split(url, ":")[2], " ")
+	}
+
+	//format 2: https://open.spotify.com/playlist/76tzi26o8O920CYAvVbeYO?si=WKrHWhGVQTSmF7GbeqI5sw
+	if strings.HasPrefix(url, "https") {
+		trimmed := strings.TrimPrefix(url, "https://open.spotify.com/")
+		return strings.Trim(strings.Split(strings.Split(trimmed, "/")[1], "?")[0], " ")
+	}
+
+	return ""
+
 	/*
 		seperated := strings.Split(url, "?")[1]
 		playlistID := strings.Trim(seperated, "si=")
