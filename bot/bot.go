@@ -156,7 +156,6 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			vi.prepSpotifyPlaylist(playlistID, s, m)
 		}
 	}
-}
 
 func (vi *VoiceInstance) validateMessage(s *discordgo.Session, m *discordgo.MessageCreate) bool {
 	c, err := s.State.Channel(m.ChannelID)
@@ -472,6 +471,7 @@ func (vi *VoiceInstance) playAudioFile(filename string, stop chan<- int) {
 				vi.skip = false
 				err = run.Process.Kill()
 				stop <- 1
+				return
 			}
 
 			//if the song that now playing is last song on the queue
