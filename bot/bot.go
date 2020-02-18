@@ -728,7 +728,7 @@ func clearPlaylistQueue(playlistQueue *queue.Queue) *queue.Queue {
 		songInstance := getSongInstanceFromInterface(nextItem[0])
 		if songInstance == nil {
 			log.Println("Error while converting interface {} to SongInstance{}.")
-			return
+			return createNewQueue()
 		}
 
 		util.DeleteFile(songInstance.songPath)
