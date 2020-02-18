@@ -2,9 +2,27 @@ package util
 
 import (
 	"fmt"
+	"io"
+	"math/rand"
+	"net/http"
 	"os"
 	"strings"
+	"time"
 )
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
+
+var letterRunes = []rune("abcdefghijklmnopqrstuvwxyz0123456789")
+
+func RandStringRunes(n int) string {
+	b := make([]rune, n)
+	for i := range b {
+		b[i] = letterRunes[rand.Intn(len(letterRunes))]
+	}
+	return string(b)
+}
 
 func FormatVideoTitle(videoTitle string) string {
 	newTitle := strings.Trim(videoTitle, " ")
@@ -52,4 +70,28 @@ func GetSpotifyPlaylistID(url string) string {
 		playlistID := strings.Trim(seperated, "si=")
 		return playlistID
 	*/
+}
+
+//GetCoverImage downloads album cover image from the
+//given url and returns its path.
+func GetCoverImage(coverUrl string) (string, error) {
+	resp, err := http.Get(coverUrl)
+	if err != nil {
+		return "", fmt.Errorf("Error while getting cover image: %v", err)
+	}
+	defer resp.Body.Close()
+
+	imgFileName := RandStringRunes(15) + ".jpg"
+
+	imgFile, err := os.Create(imgFileName)
+	if err != nil {
+		return "", fmt.Errorf("Error while creating cover image file: %v", err)
+	}
+	defer imgFile.Close()
+
+	_, err = io.Copy(imgFile, resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("Error while getting cover image file: %v", err)
+	}
+	return imgFileName, nil
 }

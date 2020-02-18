@@ -23,7 +23,10 @@ type SpotifyPlaylistTracks struct {
 				Artists []struct {
 					Name string `json:"name"`
 				} `json:"artists"`
-				Name string `json:"name"`
+				Name   string `json:"name"`
+				Images []struct {
+					Url string `json:"url"`
+				} `json:"images"`
 			} `json:"album"`
 			Artists []struct {
 				Name string `json:"name"`

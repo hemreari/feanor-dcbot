@@ -42,6 +42,14 @@ type VoiceInstance struct {
 	errQueue      *queue.Queue
 }
 
+type SongInstance struct {
+	title     string
+	artist    string
+	songPath  string
+	coverUrl  string
+	coverPath string
+}
+
 var (
 	speakers    map[uint32]*gopus.Decoder
 	opusEncoder *gopus.Encoder
@@ -156,6 +164,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			vi.prepSpotifyPlaylist(playlistID, s, m)
 		}
 	}
+}
 
 func (vi *VoiceInstance) validateMessage(s *discordgo.Session, m *discordgo.MessageCreate) bool {
 	c, err := s.State.Channel(m.ChannelID)
@@ -229,21 +238,31 @@ func (vi *VoiceInstance) prepSpotifyPlaylist(playlistID string, s *discordgo.Ses
 	for index := range items {
 		trackName := items[index].Track.Name
 
+		var coverUrl string
+		album := items[index].Track.Album
+		if album.Images[1].Url != "" {
+			coverUrl = album.Images[1].Url
+		}
+
 		var artistsName string
 		artists := items[index].Track.Artists
 		for artistIndex := range artists {
-			artistsName += artists[artistIndex].Name
+			artistsName += artists[artistIndex].Name + " "
 		}
 
-		ytQuery := artistsName + " " + trackName
+		songInstance := SongInstance{
+			title:    trackName,
+			artist:   artistsName,
+			coverUrl: coverUrl,
+		}
 
 		//first query is not putting in to the download query
 		//it's directly downloading.
 		if vi.playQueue.Empty() {
-			_ = vi.downloadQuery(ytQuery, m.ChannelID)
+			_ = vi.downloadQuery(&songInstance, m.ChannelID)
 			continue
 		}
-		vi.downloadQueue.Put(ytQuery)
+		vi.downloadQueue.Put(&songInstance)
 	}
 
 	//start the play process.
@@ -268,7 +287,7 @@ func (vi *VoiceInstance) prepPlay(query string, s *discordgo.Session, m *discord
 	}
 
 	if vi.isPlaying == false {
-		err = vi.downloadQuery(query, m.ChannelID)
+		err = vi.downloadPlayQuery(query, m.ChannelID)
 		if err != nil {
 			log.Println(err)
 			return
@@ -276,8 +295,7 @@ func (vi *VoiceInstance) prepPlay(query string, s *discordgo.Session, m *discord
 	}
 
 	if vi.isPlaying == true {
-		vi.downloadQueue.Put(query)
-		go vi.processDownloadQueue(m.ChannelID)
+		go vi.downloadPlayQuery(query, m.ChannelID)
 		return
 	}
 
@@ -351,29 +369,47 @@ func (vi *VoiceInstance) processDownloadQueue(channelID string) {
 		return
 	}
 
-	nextQuery, err := vi.downloadQueue.Get(1)
+	nextItem, err := vi.downloadQueue.Get(1)
 	if err != nil {
 		log.Println(err)
 		return
 	}
 
-	query := strings.Trim(fmt.Sprintf("%v", nextQuery), "[]")
+	songInstance := getSongInstanceFromInterface(nextItem[0])
+	if songInstance == nil {
+		log.Println("Error while converting interface {} to SongInstance{}.")
+		return
+	}
+
+	query := songInstance.artist + songInstance.title
 
 	songPath, err := yt.SearchDownload(query)
 	if err != nil {
 		log.Println(err)
 		log.Printf("Putting %s to the error queue.", query)
 		vi.sendMessageToChannel(channelID, "Query is insufficient to find a result. Try again.")
-		vi.errQueue.Put(nextQuery)
+		vi.errQueue.Put(query)
 		return
 	}
 
-	vi.playQueue.Put(songPath)
+	var coverPath string
+	coverPath, err = util.GetCoverImage(songInstance.coverUrl)
+	if err != nil {
+		log.Println(err)
+		coverPath = "default.jpg"
+	}
+
+	songInstance.songPath = songPath
+	songInstance.coverPath = coverPath
+
+	vi.playQueue.Put(songInstance)
+
 	return
 }
 
 //vide supra processDownloadQueue function comment.
-func (vi *VoiceInstance) downloadQuery(query, channelID string) error {
+func (vi *VoiceInstance) downloadQuery(songInstance *SongInstance, channelID string) error {
+	query := songInstance.artist + songInstance.title
 	songPath, err := yt.SearchDownload(query)
 	if err != nil {
 		vi.sendMessageToChannel(channelID, "Query is insufficient to find a result. Try again.")
@@ -382,7 +418,37 @@ func (vi *VoiceInstance) downloadQuery(query, channelID string) error {
 		return err
 	}
 
-	vi.playQueue.Put(songPath)
+	//get cover image
+	var coverPath string
+	coverPath, err = util.GetCoverImage(songInstance.coverUrl)
+	if err != nil {
+		log.Println(err)
+		coverPath = "default.jpg"
+	}
+
+	songInstance.songPath = songPath
+	songInstance.coverPath = coverPath
+
+	vi.playQueue.Put(songInstance)
+	return nil
+}
+
+func (vi *VoiceInstance) downloadPlayQuery(query, channelID string) error {
+	songPath, err := yt.SearchDownload(query)
+	if err != nil {
+		vi.sendMessageToChannel(channelID, "Query is insufficient to find a result. Try again.")
+		log.Printf("Putting %s to the error queue.", query)
+		vi.errQueue.Put(query)
+		return err
+	}
+
+	songInstance := &SongInstance{
+		title:     songPath,
+		songPath:  songPath,
+		coverPath: "default.jpg",
+	}
+
+	vi.playQueue.Put(songInstance)
 	return nil
 }
 
@@ -394,17 +460,24 @@ func (vi *VoiceInstance) processPlayQueue(playStat chan<- int, messageChannelID 
 		return
 	}
 
-	nextItemPath := strings.Trim(fmt.Sprintf("%v", nextItem), "[]")
-	vi.sendNowPlayingToChannel(messageChannelID, nextItemPath)
-	go vi.playAudioFile(nextItemPath, stop)
+	songInstance := getSongInstanceFromInterface(nextItem[0])
+	if songInstance == nil {
+		log.Println("Error while converting interface {} to SongInstance{}.")
+		return
+	}
+
+	songPath := songInstance.songPath
+	playingMsg := songInstance.title + " " + songInstance.artist
+	vi.sendFileWithMessage(messageChannelID, playingMsg, songInstance.coverPath)
+	go vi.playAudioFile(songPath, stop)
 	stat := <-stop
 
 	if stat == 0 || stat == 1 {
-		errDeleteFile := util.DeleteFile(nextItemPath)
+		errDeleteFile := util.DeleteFile(songPath)
 		if err != nil {
 			log.Println(errDeleteFile)
 		} else {
-			log.Printf("%s is deleted.", nextItemPath)
+			log.Printf("%s is deleted.", songPath)
 		}
 	}
 	playStat <- stat
@@ -625,6 +698,16 @@ func (vi *VoiceInstance) sendNowPlayingToChannel(channelID, songTitle string) {
 	return
 }
 
+func (vi *VoiceInstance) sendFileWithMessage(channelID, text, coverPath string) {
+	messageText := "Now Playing " + text
+	artCoverFile, _ := os.Open(coverPath)
+	_, err := vi.session.ChannelFileSendWithMessage(channelID, messageText, coverPath, artCoverFile)
+	if err != nil {
+		log.Printf("Error while sending message to channel: %v", err)
+	}
+	artCoverFile.Close()
+}
+
 //createNewQueue creates new queue and
 //returns newly created queue.
 func createNewQueue() *queue.Queue {
@@ -638,12 +721,18 @@ func clearPlaylistQueue(playlistQueue *queue.Queue) *queue.Queue {
 	for !playlistQueue.Empty() {
 		nextItem, err := playlistQueue.Get(1)
 		if err != nil {
-			log.Printf("Error while getting item from playlist: %v", err)
+			log.Printf("Error while getting item from playlist queue: %v", err)
 			return createNewQueue()
 		}
 
-		nextItemPath := strings.Trim(fmt.Sprintf("%v", nextItem), "[]")
-		util.DeleteFile(nextItemPath)
+		songInstance := getSongInstanceFromInterface(nextItem[0])
+		if songInstance == nil {
+			log.Println("Error while converting interface {} to SongInstance{}.")
+			return
+		}
+
+		util.DeleteFile(songInstance.songPath)
+		util.DeleteFile(songInstance.coverPath)
 	}
 	if playlistQueue.Empty() {
 		log.Println("All files has been deleted and Play Queue cleared.")
@@ -652,4 +741,22 @@ func clearPlaylistQueue(playlistQueue *queue.Queue) *queue.Queue {
 		log.Printf("Creating new playlist queue.")
 		return createNewQueue()
 	}
+}
+
+//getSongInstanceFromInterface takes interface{} argument
+//and returns SongInstance
+func getSongInstanceFromInterface(object interface{}) *SongInstance {
+	inst, ok := object.(*SongInstance)
+
+	if ok {
+		newInstance := SongInstance{
+			title:     inst.title,
+			artist:    inst.artist,
+			songPath:  inst.songPath,
+			coverUrl:  inst.coverUrl,
+			coverPath: inst.coverPath,
+		}
+		return &newInstance
+	}
+	return nil
 }
