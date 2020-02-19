@@ -541,6 +541,7 @@ func (vi *VoiceInstance) playAudioFile(filename string, stop chan<- int) {
 			//if playqueue is not empty send 1(int) to the channel
 			//to play next song on the queue.
 			if vi.isPlaying == true && !vi.playQueue.Empty() {
+				vi.isPlaying = false
 				vi.skip = false
 				err = run.Process.Kill()
 				stop <- 1
