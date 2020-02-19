@@ -19,8 +19,8 @@ import (
 	"../util"
 	"../youtube"
 
-	"github.com/Workiva/go-datastructures/queue"
 	"github.com/bwmarrin/discordgo"
+	"github.com/hemreari/go-datastructures/queue"
 	"layeh.com/gopus"
 )
 
@@ -153,7 +153,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	if strings.Compare(m.Content, "!show") == 0 {
-		log.Println("Download Queue: ", vi.downloadQueue)
+		vi.showPlayQueue(m)
 		log.Println("Play Queue: ", vi.playQueue)
 	}
 
@@ -682,12 +682,48 @@ func (vi *VoiceInstance) stopSong(m *discordgo.MessageCreate) {
 	}
 }
 
+//showPlayQueue sends the songs in the play queue to given channel ID.
+//TODO: when downloading songs in the download queue vi.playQueue is empty
+//this cause in showPlayQueue func to empty queue error.
+func (vi *VoiceInstance) showPlayQueue(m *discordgo.MessageCreate) {
+	items, err := vi.playQueue.PeekAll()
+	if err != nil {
+		log.Println(err)
+		vi.sendErrorMessageToChannel(m.ChannelID)
+		return
+	}
+
+	displayQueueText := "Next Songs: \n"
+
+	for index := range items {
+		instance := getSongInstanceFromInterface(items[index])
+		if instance == nil {
+			log.Println("Error while converting interface {} to SongInstance{}.")
+			vi.sendErrorMessageToChannel(m.ChannelID)
+			return
+		}
+
+		songTitle := instance.title + " " + instance.artist
+		displayQueueText += songTitle + "\n"
+	}
+
+	vi.sendMessageToChannel(m.ChannelID, displayQueueText)
+	return
+}
+
 //sendMessageToChannel sends the text to channel that given id.
 func (vi *VoiceInstance) sendMessageToChannel(channelID, text string) {
 	_, err := vi.session.ChannelMessageSend(channelID, text)
 	if err != nil {
 		log.Printf("Error while sending message to channel: %v", err)
 	}
+	return
+}
+
+//sendErrorMessageToChannel sends error message to given channel ID.
+func (vi *VoiceInstance) sendErrorMessageToChannel(channelID string) {
+	messageText := "Error while handling request. Please Try again."
+	vi.sendMessageToChannel(channelID, messageText)
 	return
 }
 
