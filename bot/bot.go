@@ -14,10 +14,10 @@ import (
 	"sync"
 	"syscall"
 
-	"../config"
-	"../spotify"
-	"../util"
-	"../youtube"
+	"github.com/hemreari/feanor-dcbot/config"
+	"github.com/hemreari/feanor-dcbot/spotify"
+	"github.com/hemreari/feanor-dcbot/util"
+	"github.com/hemreari/feanor-dcbot/youtube"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/hemreari/go-datastructures/queue"

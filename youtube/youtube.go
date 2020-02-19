@@ -7,7 +7,7 @@ import (
 	"os"
 	"os/exec"
 
-	"../util"
+	"github.com/hemreari/feanor-dcbot/util"
 
 	"google.golang.org/api/googleapi/transport"
 	"google.golang.org/api/youtube/v3"

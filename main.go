@@ -8,10 +8,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"./bot"
-	"./config"
-	//"./spotify"
-	"./youtube"
+	"github.com/hemreari/feanor-dcbot/bot"
+	"github.com/hemreari/feanor-dcbot/config"
+	"github.com/hemreari/feanor-dcbot/youtube"
 )
 
 var cfg config.Config
