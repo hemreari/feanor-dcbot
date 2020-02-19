@@ -32,8 +32,8 @@ github.com/gorilla/websocket v1.4.0/go.mod h1:E7qHFY5m1UJ88s3WnNqhKjPHQ0heANvMoA
 github.com/hashicorp/golang-lru v0.5.0/go.mod h1:/m3WP610KZHVQ1SGc6re/UDhFvYD7pJ4Ao+sR/qLZy8=
 github.com/hashicorp/golang-lru v0.5.1 h1:0hERBMJE1eitiLkihrMvRVBYAkpHzc/J3QdDN+dAcgU=
 github.com/hashicorp/golang-lru v0.5.1/go.mod h1:/m3WP610KZHVQ1SGc6re/UDhFvYD7pJ4Ao+sR/qLZy8=
-github.com/hemreari/go-datastructures v1.0.50 h1:XNzOkeS7g4cxoRhoi7rCG1LfJo3MLT2SAtIsI49FEQU=
-github.com/hemreari/go-datastructures v1.0.50/go.mod h1:dCJ/RDb/VzLJ7WdgrNsNkHkTySP8S9Y+RoDhuzIWz5g=
+github.com/hemreari/go-datastructures v1.0.51 h1:1xZXutX7oL0K6SgMN/yAi+aq6Yd0njjIRaPV4KqHQ60=
+github.com/hemreari/go-datastructures v1.0.51/go.mod h1:dCJ/RDb/VzLJ7WdgrNsNkHkTySP8S9Y+RoDhuzIWz5g=
 github.com/jstemmer/go-junit-report v0.0.0-20190106144839-af01ea7f8024/go.mod h1:6v2b51hI/fHJwM22ozAgKL4VKDeJcHhJFhtBdhmNjmU=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
