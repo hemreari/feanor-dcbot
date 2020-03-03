@@ -70,6 +70,41 @@ func (y *YoutubeAPI) GetVideoID(query string) *SearchResult {
 	return &SearchResult{}
 }
 
+func (y *YoutubeAPI) GetVideoResults(query string) *[]SearchResult {
+	developerKey := y.DeveloperKey
+
+	client := &http.Client{
+		Transport: &transport.APIKey{Key: developerKey},
+	}
+
+	service, err := youtube.New(client)
+	if err != nil {
+		log.Fatalf("Error while creating new YouTube client: %v", err)
+	}
+
+	var results []SearchResult
+
+	call := service.Search.List("id,snippet").Q(query)
+	response, err := call.Do()
+	if err != nil {
+		log.Println(err)
+	}
+
+	for _, item := range response.Items {
+		searchResult := SearchResult{}
+		switch item.Id.Kind {
+		case "youtube#video":
+			searchResult.VideoID = item.Id.VideoId
+			searchResult.VideoTitle = item.Snippet.Title
+			results = append(results, searchResult)
+		default:
+			results = append(results, searchResult)
+		}
+	}
+
+	return &results
+}
+
 func DownloadVideo(searchResult *SearchResult) (string, error) {
 	videoTitle := searchResult.VideoTitle
 	videoPath := videoTitle + ".m4a"

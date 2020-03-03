@@ -135,11 +135,30 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	//play commands searchs after !play command
 	//and plays the first result.
 	if strings.HasPrefix(m.Content, "!play") {
-		query := strings.Trim(m.Content, "!play")
+		query := strings.Trim(m.Content, "!play ")
 		if query == "" {
 			return
 		}
 		vi.prepPlay(query, s, m)
+	}
+
+	if strings.HasPrefix(m.Content, "!list") {
+		link := strings.Trim(m.Content, "!list ")
+		if strings.Contains(link, "spotify") {
+			playlistID := util.GetSpotifyPlaylistID(link)
+			vi.prepSpotifyPlaylist(playlistID, s, m)
+		}
+	}
+
+	//search commands searchs query on yt and if it's
+	//finds anything related plays.
+	if strings.HasPrefix(m.Content, "!search") {
+		query := strings.Trim(m.Content, "!search ")
+		if query == "" {
+			vi.sendMessageToChannel(m.ChannelID, "Unsufficient query. Try again, with query.")
+			return
+		}
+		vi.searchOnYoutube(query, s, m)
 	}
 
 	//skip commands plays next song
@@ -155,14 +174,6 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if strings.Compare(m.Content, "!show") == 0 {
 		vi.showPlayQueue(m)
 		log.Println("Play Queue: ", vi.playQueue)
-	}
-
-	if strings.HasPrefix(m.Content, "!list") {
-		link := strings.Trim(m.Content, "!list ")
-		if strings.Contains(link, "spotify") {
-			playlistID := util.GetSpotifyPlaylistID(link)
-			vi.prepSpotifyPlaylist(playlistID, s, m)
-		}
 	}
 }
 
@@ -194,6 +205,25 @@ func (vi *VoiceInstance) validateMessage(s *discordgo.Session, m *discordgo.Mess
 		}
 	}
 	return false
+}
+
+func (vi *VoiceInstance) searchOnYoutube(query string, s *discordgo.Session, m *discordgo.MessageCreate) {
+	if !vi.validateMessage(s, m) {
+		log.Println("message is not valid to join the voice channel.")
+		return
+	}
+
+	results := yt.GetVideoResults(query)
+	resultTxt := ""
+	resultCounter := 1
+
+	for _, value := range *results {
+		log.Println(value.VideoTitle)
+		resultTxt += strconv.Itoa(resultCounter) + "-) " + value.VideoTitle + "\n"
+		resultCounter++
+	}
+
+	vi.sendMessageToChannel(m.ChannelID, resultTxt)
 }
 
 //prepSpotifyPlaylist gets songs from the given Spotify playlist ID
@@ -365,7 +395,6 @@ func (vi *VoiceInstance) playQueueFunc(channelID string) {
 //in to one.
 func (vi *VoiceInstance) processDownloadQueue(channelID string) {
 	if vi.downloadQueue.Empty() {
-		log.Println("Download queue is empty. Closing the channel")
 		return
 	}
 
