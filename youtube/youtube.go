@@ -101,8 +101,36 @@ func (y *YoutubeAPI) GetVideoResults(query string) *[]SearchResult {
 			results = append(results, searchResult)
 		}
 	}
-
 	return &results
+}
+
+func (y *YoutubeAPI) DownloadVideo(searchResult *SearchResult) (string, error) {
+	videoPath := util.FormatVideoTitle(searchResult.VideoTitle) + ".m4a"
+
+	if searchResult.VideoID == "" {
+		return "", fmt.Errorf("Coulnd't get a video ID.")
+	}
+
+	log.Printf("Starting to download: %s\n", videoPath)
+	log.Println("video ID: ", searchResult.VideoID)
+
+	ytdlArgs := []string{
+		"-f",
+		"'bestaudio[ext=m4a]",
+		"-o",
+		videoPath,
+		searchResult.VideoID,
+	}
+
+	cmd := exec.Command("youtube-dl", ytdlArgs...)
+	cmd.Stderr = os.Stderr
+
+	err := cmd.Run()
+	if err != nil {
+		return "", fmt.Errorf("Error while downloading %s: %v", videoPath, err)
+	}
+
+	return videoPath, nil
 }
 
 func DownloadVideo(searchResult *SearchResult) (string, error) {
@@ -147,8 +175,10 @@ func (y *YoutubeAPI) SearchDownload(query string) (string, error) {
 	return path, nil
 }
 
-//DownloadQueue takes a queue as a parameter and
-//starts to download items of this queue.
-func (y *YoutubeAPI) DownloadQueue() {
-
+/*
+//DownloadWithID takes a searchResult struct as argument
+//and .
+func (y *YoutubeAPI) DownloadWithID(searchResult *SearchResult) (string, error) {
+	videoTitle :=
 }
+*/

@@ -177,30 +177,47 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 }
 
-func (vi *VoiceInstance) validateMessage(s *discordgo.Session, m *discordgo.MessageCreate) bool {
+func (vi *VoiceInstance) validateMessage(s *discordgo.Session, m *discordgo.MessageCreate) (*discordgo.Guild, error) {
 	c, err := s.State.Channel(m.ChannelID)
 	if err != nil {
-		log.Printf("Couldn't find channel: %v\n", err)
 		// Could not find channel.
-		return false
+		return nil, fmt.Errorf("Couldn't find channel: %v\n", err)
 	}
 
 	// Find the guild for that channel.
 	g, err := s.State.Guild(c.GuildID)
 	if err != nil {
-		log.Printf("Couldn't find guild: %v\n", err)
 		// Could not find guild.
-		return false
+		return nil, fmt.Errorf("Couldn't find guild: %v\n", err)
 	}
 
+	return g, nil
+
+	/*
+		for _, vs := range g.VoiceStates {
+			if vs.UserID == m.Author.ID {
+				dgv, err := s.ChannelVoiceJoin(g.ID, vs.ChannelID, false, true)
+				vi.dgv = dgv
+				if err != nil {
+					fmt.Printf("Couldn't join the voice channel: %v\n", err)
+					return false
+				}
+				return true
+			}
+		}
+		return false
+	*/
+}
+
+func (vi *VoiceInstance) channelVoiceJoin(g *discordgo.Guild, s *discordgo.Session, m *discordgo.MessageCreate) bool {
 	for _, vs := range g.VoiceStates {
 		if vs.UserID == m.Author.ID {
 			dgv, err := s.ChannelVoiceJoin(g.ID, vs.ChannelID, false, true)
-			vi.dgv = dgv
 			if err != nil {
 				fmt.Printf("Couldn't join the voice channel: %v\n", err)
 				return false
 			}
+			vi.dgv = dgv
 			return true
 		}
 	}
@@ -208,10 +225,13 @@ func (vi *VoiceInstance) validateMessage(s *discordgo.Session, m *discordgo.Mess
 }
 
 func (vi *VoiceInstance) searchOnYoutube(query string, s *discordgo.Session, m *discordgo.MessageCreate) {
-	if !vi.validateMessage(s, m) {
-		log.Println("message is not valid to join the voice channel.")
+	_, err := vi.validateMessage(s, m)
+	if err != nil {
+		log.Println(err)
 		return
 	}
+
+	resultsMap := make(map[int]youtube.SearchResult)
 
 	results := yt.GetVideoResults(query)
 	resultTxt := ""
@@ -219,19 +239,41 @@ func (vi *VoiceInstance) searchOnYoutube(query string, s *discordgo.Session, m *
 
 	for _, value := range *results {
 		log.Println(value.VideoTitle)
+		resultsMap[resultCounter] = value
 		resultTxt += strconv.Itoa(resultCounter) + "-) " + value.VideoTitle + "\n"
 		resultCounter++
 	}
 
 	vi.sendMessageToChannel(m.ChannelID, resultTxt)
+	s.AddHandlerOnce(func(s *discordgo.Session, m *discordgo.MessageCreate) {
+		userResponseInt, err := strconv.Atoi(m.Content)
+		if err != nil {
+			log.Println(err)
+			vi.sendMessageToChannel(m.ChannelID, "I accept only numbers.")
+		}
+		if userResponseInt < 1 && userResponseInt > resultCounter {
+			vi.sendMessageToChannel(m.ChannelID, "Not an available option.")
+		}
+		if strings.HasPrefix(m.Content, "!done") {
+			return
+		}
+		result := resultsMap[userResponseInt]
+		vi.prepSearchSelectionPlay(&result, s, m)
+		return
+	})
 }
 
 //prepSpotifyPlaylist gets songs from the given Spotify playlist ID
 //and parses them as youtube queries to add to the download queue.
 //finally starts the play process.
 func (vi *VoiceInstance) prepSpotifyPlaylist(playlistID string, s *discordgo.Session, m *discordgo.MessageCreate) {
-	if !vi.validateMessage(s, m) {
-		log.Println("message is not valid to join the voice channel.")
+	guild, err := vi.validateMessage(s, m)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	if !vi.channelVoiceJoin(guild, s, m) {
 		return
 	}
 
@@ -343,6 +385,31 @@ func (vi *VoiceInstance) prepPlay(query string, s *discordgo.Session, m *discord
 	}
 }
 
+func (vi *VoiceInstance) prepSearchSelectionPlay(searchResult *youtube.SearchResult, s *discordgo.Session, m *discordgo.MessageCreate) {
+	guild, err := vi.validateMessage(s, m)
+	if err != nil {
+		return
+	}
+
+	if vi.isPlaying == false {
+		err = vi.downloadSelection(searchResult, m.ChannelID)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+	}
+
+	if vi.isPlaying == true {
+		vi.stopSong(m)
+		vi.downloadSelection(searchResult, m.ChannelID)
+	}
+
+	if !vi.channelVoiceJoin(guild, s, m) {
+		return
+	}
+	vi.playQueueFunc(m.ChannelID)
+}
+
 func (vi *VoiceInstance) playQueueFunc(channelID string) {
 	err := vi.dgv.Speaking(true)
 	if err != nil {
@@ -432,8 +499,25 @@ func (vi *VoiceInstance) processDownloadQueue(channelID string) {
 	songInstance.coverPath = coverPath
 
 	vi.playQueue.Put(songInstance)
-
 	return
+}
+
+func (vi *VoiceInstance) downloadSelection(searchResult *youtube.SearchResult, channelID string) error {
+	songPath, err := yt.DownloadVideo(searchResult)
+	if err != nil {
+		vi.sendMessageToChannel(channelID, "Unexpected thing happend. Try again.")
+		return err
+	}
+
+	coverPath := "defualt.jpg"
+
+	songInstance := &SongInstance{
+		songPath:  songPath,
+		coverPath: coverPath,
+	}
+
+	vi.playQueue.Put(songInstance)
+	return nil
 }
 
 //vide supra processDownloadQueue function comment.
