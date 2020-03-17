@@ -3,9 +3,12 @@ package util
 import (
 	"fmt"
 	"io"
+	"log"
 	"math/rand"
 	"net/http"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -15,6 +18,8 @@ func init() {
 }
 
 var letterRunes = []rune("abcdefghijklmnopqrstuvwxyz0123456789")
+var ytUrlRegex = `(?m)^(http(s)??\:\/\/)?(www\.)?((youtube\.com\/watch\?v=)|(youtu.be\/))([a-zA-Z0-9\-_])+`
+var durationRegex = `P(?P<years>\d+Y)?(?P<months>\d+M)?(?P<days>\d+D)?T?(?P<hours>\d+H)?(?P<minutes>\d+M)?(?P<seconds>\d+S)?`
 
 func RandStringRunes(n int) string {
 	b := make([]rune, n)
@@ -72,6 +77,12 @@ func GetSpotifyPlaylistID(url string) string {
 	*/
 }
 
+//GetYtVideoID trims video id from the given url.
+func GetYtVideoID(url string) string {
+	//format: https://www.youtube.com/watch?v=qT6XCvDUUsU
+	return strings.TrimPrefix(url, "https://www.youtube.com/watch?v=")
+}
+
 //GetCoverImage downloads album cover image from the
 //given url and returns its path.
 func GetCoverImage(coverUrl string) (string, error) {
@@ -94,4 +105,54 @@ func GetCoverImage(coverUrl string) (string, error) {
 		return "", fmt.Errorf("Error while getting cover image file: %v", err)
 	}
 	return imgFileName, nil
+}
+
+//ValiadateYtUrl validates whether given url is a youtube url or not.
+func ValidateYtUrl(url string) bool {
+	r, err := regexp.Compile(ytUrlRegex)
+	if err != nil {
+		log.Println(err)
+		return false
+	}
+	return r.MatchString(url)
+}
+
+//ParseISO8601 takes a duration in format ISO8601 and parses to
+//MM:SS format.
+func ParseISO8601(duration string) string {
+	r, err := regexp.Compile(durationRegex)
+	if err != nil {
+		log.Println(err)
+		return ""
+	}
+
+	matches := r.FindStringSubmatch(duration)
+
+	years := parseInt64(matches[1])
+	months := parseInt64(matches[2])
+	days := parseInt64(matches[3])
+	hours := parseInt64(matches[4])
+	minutes := parseInt64(matches[5])
+	seconds := parseInt64(matches[6])
+
+	hour := int64(time.Hour)
+	minute := int64(time.Minute)
+	second := int64(time.Second)
+
+	return time.Duration(years*24*365*hour +
+		months*30*24*hour + days*24*hour +
+		hours*hour + minutes*minute + seconds*second).String()
+}
+
+func parseInt64(value string) int64 {
+	if len(value) == 0 {
+		return 0
+	}
+
+	parsed, err := strconv.Atoi(value[:len(value)-1])
+	if err != nil {
+		return 0
+	}
+
+	return int64(parsed)
 }

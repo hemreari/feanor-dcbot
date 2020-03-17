@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	//"strings"
 
 	"github.com/hemreari/feanor-dcbot/util"
 
@@ -20,6 +21,7 @@ type YoutubeAPI struct {
 type SearchResult struct {
 	VideoID    string
 	VideoTitle string
+	Duration   string
 }
 
 func NewYoutubeAPI(developerKey string) *YoutubeAPI {
@@ -61,6 +63,7 @@ func (y *YoutubeAPI) GetVideoID(query string) *SearchResult {
 			return &SearchResult{
 				VideoID:    item.Id.VideoId,
 				VideoTitle: newTitle,
+				//Duration:   y.GetDurationByID(item.Id.VideoId),
 			}
 		default:
 			return &SearchResult{}
@@ -96,12 +99,37 @@ func (y *YoutubeAPI) GetVideoResults(query string) *[]SearchResult {
 		case "youtube#video":
 			searchResult.VideoID = item.Id.VideoId
 			searchResult.VideoTitle = item.Snippet.Title
+			searchResult.Duration = y.GetDurationByID(item.Id.VideoId)
 			results = append(results, searchResult)
 		default:
 			results = append(results, searchResult)
 		}
 	}
 	return &results
+}
+
+func (y *YoutubeAPI) GetDurationByID(id string) string {
+	devKey := y.DeveloperKey
+
+	client := &http.Client{
+		Transport: &transport.APIKey{Key: devKey},
+	}
+
+	service, err := youtube.New(client)
+	if err != nil {
+		log.Fatalf("Error while creating new Youtube client: %v", err)
+	}
+
+	call := service.Videos.List("id,contentDetails").Id(id)
+	response, err := call.Do()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, item := range response.Items {
+		return util.ParseISO8601(item.ContentDetails.Duration)
+	}
+	return ""
 }
 
 func (y *YoutubeAPI) DownloadVideo(searchResult *SearchResult) (string, error) {
@@ -112,7 +140,6 @@ func (y *YoutubeAPI) DownloadVideo(searchResult *SearchResult) (string, error) {
 	}
 
 	log.Printf("Starting to download: %s\n", videoPath)
-	log.Println("video ID: ", searchResult.VideoID)
 
 	ytdlArgs := []string{
 		"-f",
@@ -138,7 +165,7 @@ func DownloadVideo(searchResult *SearchResult) (string, error) {
 	videoPath := videoTitle + ".m4a"
 
 	if searchResult.VideoID == "" {
-		return "", fmt.Errorf("Coulnd't get a video ID.")
+		return "", fmt.Errorf("Couldn't get a video ID.")
 	}
 
 	log.Printf("Starting to download: %s\n", videoTitle)
@@ -175,10 +202,37 @@ func (y *YoutubeAPI) SearchDownload(query string) (string, error) {
 	return path, nil
 }
 
-/*
-//DownloadWithID takes a searchResult struct as argument
-//and .
-func (y *YoutubeAPI) DownloadWithID(searchResult *SearchResult) (string, error) {
-	videoTitle :=
+//GetInfoByID returns video information about the given video id
+func (y *YoutubeAPI) GetInfoByID(id string) *SearchResult {
+	devKey := y.DeveloperKey
+
+	client := &http.Client{
+		Transport: &transport.APIKey{Key: devKey},
+	}
+
+	service, err := youtube.New(client)
+	if err != nil {
+		log.Fatalf("Error while creating new YouTube client: %v", err)
+	}
+
+	call := service.Videos.List("id").Id(id)
+	response, err := call.Do()
+	if err != nil {
+		log.Println(err)
+	}
+
+	for _, item := range response.Items {
+		switch item.Kind {
+		case "youtube#video":
+			newTitle := util.FormatVideoTitle(item.Snippet.Title)
+			return &SearchResult{
+				VideoID:    item.Id,
+				VideoTitle: newTitle,
+				Duration:   item.ContentDetails.Duration,
+			}
+		default:
+			return &SearchResult{}
+		}
+	}
+	return nil
 }
-*/

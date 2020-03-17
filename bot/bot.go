@@ -139,7 +139,11 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		if query == "" {
 			return
 		}
-		vi.prepPlay(query, s, m)
+		if util.ValidateYtUrl(query) {
+			vi.prepYtUrl(query, s, m)
+		}
+		vi.prepQuery(query, s, m)
+		//vi.prepPlay(query, s, m)
 	}
 
 	if strings.HasPrefix(m.Content, "!list") {
@@ -240,11 +244,20 @@ func (vi *VoiceInstance) searchOnYoutube(query string, s *discordgo.Session, m *
 	for _, value := range *results {
 		log.Println(value.VideoTitle)
 		resultsMap[resultCounter] = value
-		resultTxt += strconv.Itoa(resultCounter) + "-) " + value.VideoTitle + "\n"
+		resultTxt += strconv.Itoa(resultCounter) + "-) " + value.VideoTitle + " (" + value.Duration + ")" + "\n"
+
+		embeddedMessage := &discordgo.MessageEmbed{
+			URL:   "https://www.youtube.com/watch?v=" + value.VideoID,
+			Type:  "link",
+			Title: value.VideoTitle,
+			Color: 2,
+		}
+		vi.sendEmbeddedMessage(m.ChannelID, embeddedMessage)
 		resultCounter++
 	}
 
-	vi.sendMessageToChannel(m.ChannelID, resultTxt)
+	//vi.sendEmbeddedMessage(m.ChannelID, embeddedMessage)
+	//vi.sendMessageToChannel(m.ChannelID, resultTxt)
 	s.AddHandlerOnce(func(s *discordgo.Session, m *discordgo.MessageCreate) {
 		userResponseInt, err := strconv.Atoi(m.Content)
 		if err != nil {
@@ -339,6 +352,42 @@ func (vi *VoiceInstance) prepSpotifyPlaylist(playlistID string, s *discordgo.Ses
 
 	//start the play process.
 	vi.playQueueFunc(m.ChannelID)
+}
+
+//prepQuery preperas simple queries like "rammstein deutschland" to play.
+func (vi *VoiceInstance) prepQuery(query string, s *discordgo.Session, m *discordgo.MessageCreate) {
+	guild, err := vi.validateMessage(s, m)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	if vi.isPlaying == false {
+		err = vi.downloadPlayQuery(query, m.ChannelID)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+	}
+
+	if vi.isPlaying == true {
+		go vi.downloadPlayQuery(query, m.ChannelID)
+		return
+	}
+
+	if !vi.channelVoiceJoin(guild, s, m) {
+		return
+	}
+	vi.playQueueFunc(m.ChannelID)
+	return
+}
+
+//prepYtUrl prepares given yt urls like "https://www.youtube.com/watch?v=6MyAOqrPACY" to play.
+func (vi *VoiceInstance) prepYtUrl(url string, s *discordgo.Session, m *discordgo.MessageCreate) {
+	videoID := util.GetYtVideoID(url)
+
+	yt.GetInfoByID(videoID)
+	return
 }
 
 func (vi *VoiceInstance) prepPlay(query string, s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -834,7 +883,7 @@ func (vi *VoiceInstance) sendMessageToChannel(channelID, text string) {
 	return
 }
 
-//sendErrorMessageToChannel sends error message to given channel ID.
+//sendErrorMessageToChannel sends error message to given channel.
 func (vi *VoiceInstance) sendErrorMessageToChannel(channelID string) {
 	messageText := "Error while handling request. Please Try again."
 	vi.sendMessageToChannel(channelID, messageText)
@@ -856,6 +905,14 @@ func (vi *VoiceInstance) sendFileWithMessage(channelID, text, coverPath string) 
 		log.Printf("Error while sending message to channel: %v", err)
 	}
 	artCoverFile.Close()
+}
+
+//sendEmbeddedMessage sends embedded message to given channel.
+func (vi *VoiceInstance) sendEmbeddedMessage(channelID string, embed *discordgo.MessageEmbed) {
+	_, err := vi.session.ChannelMessageSendEmbed(channelID, embed)
+	if err != nil {
+		log.Printf("Error while sending embedded message to channel: %v", err)
+	}
 }
 
 //createNewQueue creates new queue and
