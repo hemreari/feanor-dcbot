@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/hemreari/feanor-dcbot/config"
 	"github.com/hemreari/feanor-dcbot/spotify"
@@ -25,10 +26,11 @@ import (
 )
 
 const (
-	channels  int = 2                   // 1 for mono, 2 for stereo
-	frameRate int = 48000               // audio sampling rate
-	frameSize int = 960                 // uint16 size of each audio frame
-	maxBytes  int = (frameSize * 2) * 2 // max size of opus data
+	channels         int    = 2                   // 1 for mono, 2 for stereo
+	frameRate        int    = 48000               // audio sampling rate
+	frameSize        int    = 960                 // uint16 size of each audio frame
+	maxBytes         int    = (frameSize * 2) * 2 // max size of opus data
+	youtubeUrlPrefix string = "https://www.youtube.com/watch?v="
 )
 
 type VoiceInstance struct {
@@ -48,6 +50,7 @@ type SongInstance struct {
 	songPath  string
 	coverUrl  string
 	coverPath string
+	videoID   string
 }
 
 var (
@@ -238,26 +241,15 @@ func (vi *VoiceInstance) searchOnYoutube(query string, s *discordgo.Session, m *
 	resultsMap := make(map[int]youtube.SearchResult)
 
 	results := yt.GetVideoResults(query)
-	resultTxt := ""
 	resultCounter := 1
 
 	for _, value := range *results {
-		log.Println(value.VideoTitle)
 		resultsMap[resultCounter] = value
-		resultTxt += strconv.Itoa(resultCounter) + "-) " + value.VideoTitle + " (" + value.Duration + ")" + "\n"
-
-		embeddedMessage := &discordgo.MessageEmbed{
-			URL:   "https://www.youtube.com/watch?v=" + value.VideoID,
-			Type:  "link",
-			Title: value.VideoTitle,
-			Color: 2,
-		}
-		vi.sendEmbeddedMessage(m.ChannelID, embeddedMessage)
 		resultCounter++
 	}
 
-	//vi.sendEmbeddedMessage(m.ChannelID, embeddedMessage)
-	//vi.sendMessageToChannel(m.ChannelID, resultTxt)
+	vi.sendSearchResultMessageToChannel(m.ChannelID, results)
+
 	s.AddHandlerOnce(func(s *discordgo.Session, m *discordgo.MessageCreate) {
 		userResponseInt, err := strconv.Atoi(m.Content)
 		if err != nil {
@@ -528,7 +520,7 @@ func (vi *VoiceInstance) processDownloadQueue(channelID string) {
 
 	query := songInstance.artist + songInstance.title
 
-	songPath, err := yt.SearchDownload(query)
+	searchResult, err := yt.SearchDownload(query)
 	if err != nil {
 		log.Println(err)
 		log.Printf("Putting %s to the error queue.", query)
@@ -544,7 +536,7 @@ func (vi *VoiceInstance) processDownloadQueue(channelID string) {
 		coverPath = "default.jpg"
 	}
 
-	songInstance.songPath = songPath
+	songInstance.songPath = searchResult.VideoPath
 	songInstance.coverPath = coverPath
 
 	vi.playQueue.Put(songInstance)
@@ -572,7 +564,7 @@ func (vi *VoiceInstance) downloadSelection(searchResult *youtube.SearchResult, c
 //vide supra processDownloadQueue function comment.
 func (vi *VoiceInstance) downloadQuery(songInstance *SongInstance, channelID string) error {
 	query := songInstance.artist + songInstance.title
-	songPath, err := yt.SearchDownload(query)
+	searchResult, err := yt.SearchDownload(query)
 	if err != nil {
 		vi.sendMessageToChannel(channelID, "Query is insufficient to find a result. Try again.")
 		log.Printf("Putting %s to the error queue.", query)
@@ -588,7 +580,7 @@ func (vi *VoiceInstance) downloadQuery(songInstance *SongInstance, channelID str
 		coverPath = "default.jpg"
 	}
 
-	songInstance.songPath = songPath
+	songInstance.songPath = searchResult.VideoPath
 	songInstance.coverPath = coverPath
 
 	vi.playQueue.Put(songInstance)
@@ -596,7 +588,7 @@ func (vi *VoiceInstance) downloadQuery(songInstance *SongInstance, channelID str
 }
 
 func (vi *VoiceInstance) downloadPlayQuery(query, channelID string) error {
-	songPath, err := yt.SearchDownload(query)
+	searchResult, err := yt.SearchDownload(query)
 	if err != nil {
 		vi.sendMessageToChannel(channelID, "Query is insufficient to find a result. Try again.")
 		log.Printf("Putting %s to the error queue.", query)
@@ -605,9 +597,10 @@ func (vi *VoiceInstance) downloadPlayQuery(query, channelID string) error {
 	}
 
 	songInstance := &SongInstance{
-		title:     songPath,
-		songPath:  songPath,
+		title:     searchResult.VideoTitle,
+		songPath:  searchResult.VideoPath,
 		coverPath: "default.jpg",
+		videoID:   searchResult.VideoID,
 	}
 
 	vi.playQueue.Put(songInstance)
@@ -907,12 +900,48 @@ func (vi *VoiceInstance) sendFileWithMessage(channelID, text, coverPath string) 
 	artCoverFile.Close()
 }
 
-//sendEmbeddedMessage sends embedded message to given channel.
-func (vi *VoiceInstance) sendEmbeddedMessage(channelID string, embed *discordgo.MessageEmbed) {
+//sendEmbeddedMessageToChannel sends embedded message to given channel.
+func (vi *VoiceInstance) sendEmbeddedMessageToChannel(channelID string, embed *discordgo.MessageEmbed) {
 	_, err := vi.session.ChannelMessageSendEmbed(channelID, embed)
 	if err != nil {
 		log.Printf("Error while sending embedded message to channel: %v", err)
 	}
+}
+
+//sendSearchResultMessageToChannel sends results of !saerch commands to given channel.
+func (vi *VoiceInstance) sendSearchResultMessageToChannel(channelID string, searchResults *[]youtube.SearchResult) {
+	embed := &discordgo.MessageEmbed{
+		Author:    &discordgo.MessageEmbedAuthor{},
+		Color:     0xfd0057,
+		Fields:    createMessageEmbedFields(searchResults),
+		Timestamp: time.Now().Format(time.RFC3339),
+		Title:     "Search Results:",
+	}
+
+	vi.sendEmbeddedMessageToChannel(channelID, embed)
+}
+
+//createMessageEmbedFields is a helper function to create MessageEmbedField array.
+func createMessageEmbedFields(searchResults *[]youtube.SearchResult) []*discordgo.MessageEmbedField {
+	messageEmbedFields := []*discordgo.MessageEmbedField{}
+	resultCounter := 1
+	for _, element := range *searchResults {
+		embedField := &discordgo.MessageEmbedField{
+			Name: strconv.Itoa(resultCounter) + ")",
+			//Value:  "https://www.youtube.com/watch?v=" + element.VideoID,
+			Value:  formatEmbededLinkText(element.VideoTitle, element.Duration, element.VideoID),
+			Inline: false,
+		}
+		messageEmbedFields = append(messageEmbedFields, embedField)
+		resultCounter++
+	}
+
+	return messageEmbedFields
+}
+
+//formatEmbededLinkText is a helper function to create embeded link text.
+func formatEmbededLinkText(title, duration, id string) string {
+	return "[" + title + "(" + duration + ")" + "](" + youtubeUrlPrefix + id + ")"
 }
 
 //createNewQueue creates new queue and
@@ -962,6 +991,7 @@ func getSongInstanceFromInterface(object interface{}) *SongInstance {
 			songPath:  inst.songPath,
 			coverUrl:  inst.coverUrl,
 			coverPath: inst.coverPath,
+			videoID:   inst.videoID,
 		}
 		return &newInstance
 	}

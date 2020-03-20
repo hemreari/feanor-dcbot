@@ -22,6 +22,7 @@ type SearchResult struct {
 	VideoID    string
 	VideoTitle string
 	Duration   string
+	VideoPath  string
 }
 
 func NewYoutubeAPI(developerKey string) *YoutubeAPI {
@@ -63,7 +64,7 @@ func (y *YoutubeAPI) GetVideoID(query string) *SearchResult {
 			return &SearchResult{
 				VideoID:    item.Id.VideoId,
 				VideoTitle: newTitle,
-				//Duration:   y.GetDurationByID(item.Id.VideoId),
+				Duration:   y.GetDurationByID(item.Id.VideoId),
 			}
 		default:
 			return &SearchResult{}
@@ -97,6 +98,9 @@ func (y *YoutubeAPI) GetVideoResults(query string) *[]SearchResult {
 		searchResult := SearchResult{}
 		switch item.Id.Kind {
 		case "youtube#video":
+			if item.Snippet.Title == "" {
+				continue
+			}
 			searchResult.VideoID = item.Id.VideoId
 			searchResult.VideoTitle = item.Snippet.Title
 			searchResult.Duration = y.GetDurationByID(item.Id.VideoId)
@@ -192,14 +196,15 @@ func DownloadVideo(searchResult *SearchResult) (string, error) {
 
 //SearchDownload combines abilities of GetVideoID and
 //DownloadVideo func's as a standalone function
-func (y *YoutubeAPI) SearchDownload(query string) (string, error) {
+func (y *YoutubeAPI) SearchDownload(query string) (*SearchResult, error) {
 	searchRes := y.GetVideoID(query)
 
 	path, err := DownloadVideo(searchRes)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return path, nil
+	searchRes.VideoPath = path
+	return searchRes, nil
 }
 
 //GetInfoByID returns video information about the given video id
