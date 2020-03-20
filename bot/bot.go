@@ -248,7 +248,7 @@ func (vi *VoiceInstance) searchOnYoutube(query string, s *discordgo.Session, m *
 		resultCounter++
 	}
 
-	vi.sendSearchResultMessageToChannel(m.ChannelID, results)
+	messageID := vi.sendSearchResultMessageToChannel(m.ChannelID, results)
 
 	s.AddHandlerOnce(func(s *discordgo.Session, m *discordgo.MessageCreate) {
 		userResponseInt, err := strconv.Atoi(m.Content)
@@ -263,9 +263,11 @@ func (vi *VoiceInstance) searchOnYoutube(query string, s *discordgo.Session, m *
 			return
 		}
 		result := resultsMap[userResponseInt]
+		vi.sentMessageEditEmbed(m.ChannelID, messageID, &result)
 		vi.prepSearchSelectionPlay(&result, s, m)
 		return
 	})
+
 }
 
 //prepSpotifyPlaylist gets songs from the given Spotify playlist ID
@@ -900,25 +902,57 @@ func (vi *VoiceInstance) sendFileWithMessage(channelID, text, coverPath string) 
 	artCoverFile.Close()
 }
 
-//sendEmbeddedMessageToChannel sends embedded message to given channel.
-func (vi *VoiceInstance) sendEmbeddedMessageToChannel(channelID string, embed *discordgo.MessageEmbed) {
-	_, err := vi.session.ChannelMessageSendEmbed(channelID, embed)
-	if err != nil {
-		log.Printf("Error while sending embedded message to channel: %v", err)
+//sentMessageEditEmbed edits last sent message(in our case this message is sendSearchResult)
+//to show now playing message.
+func (vi *VoiceInstance) sentMessageEditEmbed(channelID, messageID string, searchResult *youtube.SearchResult) {
+	embed := &discordgo.MessageEmbed{
+		Author: &discordgo.MessageEmbedAuthor{},
+		Color:  0x26e232,
+		Fields: []*discordgo.MessageEmbedField{
+			&discordgo.MessageEmbedField{
+				Name: "Now Playing: ",
+				Value: formatEmbededLinkText(searchResult.VideoTitle,
+					searchResult.Duration,
+					searchResult.VideoID),
+				Inline: false,
+			},
+		},
+		Timestamp: time.Now().Format(time.RFC3339),
 	}
+	_, err := vi.session.ChannelMessageEditEmbed(channelID, messageID, embed)
+	if err != nil {
+		log.Printf("Error while editing embeded message: %v", err)
+		return
+	}
+	return
+}
+
+//sendEmbeddedMessageToChannel sends embedded message to given channel.
+//returns sent message struct.
+func (vi *VoiceInstance) sendEmbeddedMessageToChannel(channelID string, embed *discordgo.MessageEmbed) (*discordgo.Message, error) {
+	message, err := vi.session.ChannelMessageSendEmbed(channelID, embed)
+	if err != nil {
+		return nil, fmt.Errorf("Error while sending embedded message to channel: %v", err)
+	}
+	return message, nil
 }
 
 //sendSearchResultMessageToChannel sends results of !saerch commands to given channel.
-func (vi *VoiceInstance) sendSearchResultMessageToChannel(channelID string, searchResults *[]youtube.SearchResult) {
+//returns sent message ID.
+func (vi *VoiceInstance) sendSearchResultMessageToChannel(channelID string, searchResults *[]youtube.SearchResult) string {
 	embed := &discordgo.MessageEmbed{
 		Author:    &discordgo.MessageEmbedAuthor{},
 		Color:     0xfd0057,
 		Fields:    createMessageEmbedFields(searchResults),
 		Timestamp: time.Now().Format(time.RFC3339),
-		Title:     "Search Results:",
 	}
 
-	vi.sendEmbeddedMessageToChannel(channelID, embed)
+	message, err := vi.sendEmbeddedMessageToChannel(channelID, embed)
+	if err != nil {
+		log.Println(err)
+		return ""
+	}
+	return message.ID
 }
 
 //createMessageEmbedFields is a helper function to create MessageEmbedField array.
@@ -927,8 +961,7 @@ func createMessageEmbedFields(searchResults *[]youtube.SearchResult) []*discordg
 	resultCounter := 1
 	for _, element := range *searchResults {
 		embedField := &discordgo.MessageEmbedField{
-			Name: strconv.Itoa(resultCounter) + ")",
-			//Value:  "https://www.youtube.com/watch?v=" + element.VideoID,
+			Name:   strconv.Itoa(resultCounter) + ")",
 			Value:  formatEmbededLinkText(element.VideoTitle, element.Duration, element.VideoID),
 			Inline: false,
 		}
