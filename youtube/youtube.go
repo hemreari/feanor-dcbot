@@ -23,6 +23,7 @@ type SearchResult struct {
 	VideoTitle string
 	Duration   string
 	VideoPath  string
+	CoverPath  string
 }
 
 func NewYoutubeAPI(developerKey string) *YoutubeAPI {
@@ -65,6 +66,7 @@ func (y *YoutubeAPI) GetVideoID(query string) *SearchResult {
 				VideoID:    item.Id.VideoId,
 				VideoTitle: newTitle,
 				Duration:   y.GetDurationByID(item.Id.VideoId),
+				CoverPath:  "https://github.com/golang/go/blob/master/doc/gopher/fiveyears.jpg",
 			}
 		default:
 			return &SearchResult{}
@@ -104,6 +106,7 @@ func (y *YoutubeAPI) GetVideoResults(query string) *[]SearchResult {
 			searchResult.VideoID = item.Id.VideoId
 			searchResult.VideoTitle = item.Snippet.Title
 			searchResult.Duration = y.GetDurationByID(item.Id.VideoId)
+			searchResult.CoverPath = "https://github.com/golang/go/blob/master/doc/gopher/fiveyears.jpg"
 			results = append(results, searchResult)
 		default:
 			results = append(results, searchResult)
@@ -220,7 +223,7 @@ func (y *YoutubeAPI) GetInfoByID(id string) *SearchResult {
 		log.Fatalf("Error while creating new YouTube client: %v", err)
 	}
 
-	call := service.Videos.List("id").Id(id)
+	call := service.Videos.List("id,contentDetails,snippet").Id(id)
 	response, err := call.Do()
 	if err != nil {
 		log.Println(err)
@@ -233,7 +236,7 @@ func (y *YoutubeAPI) GetInfoByID(id string) *SearchResult {
 			return &SearchResult{
 				VideoID:    item.Id,
 				VideoTitle: newTitle,
-				Duration:   item.ContentDetails.Duration,
+				Duration:   util.ParseISO8601(item.ContentDetails.Duration),
 			}
 		default:
 			return &SearchResult{}

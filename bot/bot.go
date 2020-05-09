@@ -51,6 +51,7 @@ type SongInstance struct {
 	coverUrl  string
 	coverPath string
 	videoID   string
+	duration  string
 }
 
 var (
@@ -180,7 +181,6 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	if strings.Compare(m.Content, "!show") == 0 {
 		vi.showPlayQueue(m)
-		log.Println("Play Queue: ", vi.playQueue)
 	}
 }
 
@@ -267,7 +267,6 @@ func (vi *VoiceInstance) searchOnYoutube(query string, s *discordgo.Session, m *
 		vi.prepSearchSelectionPlay(&result, s, m)
 		return
 	})
-
 }
 
 //prepSpotifyPlaylist gets songs from the given Spotify playlist ID
@@ -287,17 +286,6 @@ func (vi *VoiceInstance) prepSpotifyPlaylist(playlistID string, s *discordgo.Ses
 	//initialise spotify api.
 	spotifyAPI := initSpotifyAPI()
 
-	//get playlist info from spotify api.
-	sptfyPlaylistInfo, err := spotifyAPI.GetPlaylist(playlistID)
-	if err != nil {
-		log.Printf("Error while getting Spotify playlist information: %v", err)
-		vi.sendMessageToChannel(m.ChannelID, "Unexpected thing is happened. Please, Try again.")
-		return
-	}
-
-	log.Println("Playlist Name: ", sptfyPlaylistInfo.Name)
-	log.Println("Playlist Owner: ", sptfyPlaylistInfo.Owner.ID)
-
 	//get playlist tracks
 	plTracks, err := spotifyAPI.GetTracksFromPlaylist(playlistID)
 	if err != nil {
@@ -312,9 +300,16 @@ func (vi *VoiceInstance) prepSpotifyPlaylist(playlistID string, s *discordgo.Ses
 		vi.stopSong(m)
 	}
 
+	itemCounter := 0
+
 	//parse playlist tracks to artist and track name.
 	items := plTracks.Items
 	for index := range items {
+		//for a single playlist, we are processing maximum 100 songs.
+		//It consumes %10.05 of daily quota limit.
+		if itemCounter > 20 {
+			break
+		}
 		trackName := items[index].Track.Name
 
 		var coverUrl string
@@ -339,9 +334,11 @@ func (vi *VoiceInstance) prepSpotifyPlaylist(playlistID string, s *discordgo.Ses
 		//it's directly downloading.
 		if vi.playQueue.Empty() {
 			_ = vi.downloadQuery(&songInstance, m.ChannelID)
+			itemCounter++
 			continue
 		}
 		vi.downloadQueue.Put(&songInstance)
+		itemCounter++
 	}
 
 	//start the play process.
@@ -463,10 +460,18 @@ func (vi *VoiceInstance) playQueueFunc(channelID string) {
 		vi.disconnectBot()
 	}()
 
+	wg := sync.WaitGroup{}
+
 	chanPlayStat := make(chan int)
 	for {
 		if !vi.downloadQueue.Empty() {
-			go vi.processDownloadQueue(channelID)
+			for worker := 0; worker < 3; worker++ {
+				wg.Add(1)
+				go func(worker int) {
+					defer wg.Done()
+					vi.processDownloadQueue(channelID)
+				}(worker)
+			}
 		}
 
 		//isPlaying is false means that bot is not  playing any song
@@ -526,7 +531,7 @@ func (vi *VoiceInstance) processDownloadQueue(channelID string) {
 	if err != nil {
 		log.Println(err)
 		log.Printf("Putting %s to the error queue.", query)
-		vi.sendMessageToChannel(channelID, "Query is insufficient to find a result. Try again.")
+		//vi.sendMessageToChannel(channelID, "Query is insufficient to find a result. Try again.")
 		vi.errQueue.Put(query)
 		return
 	}
@@ -552,7 +557,7 @@ func (vi *VoiceInstance) downloadSelection(searchResult *youtube.SearchResult, c
 		return err
 	}
 
-	coverPath := "defualt.jpg"
+	coverPath := "https://github.com/golang/go/blob/master/doc/gopher/fiveyears.jpg"
 
 	songInstance := &SongInstance{
 		songPath:  songPath,
@@ -584,6 +589,7 @@ func (vi *VoiceInstance) downloadQuery(songInstance *SongInstance, channelID str
 
 	songInstance.songPath = searchResult.VideoPath
 	songInstance.coverPath = coverPath
+	songInstance.duration = searchResult.Duration
 
 	vi.playQueue.Put(songInstance)
 	return nil
@@ -624,8 +630,11 @@ func (vi *VoiceInstance) processPlayQueue(playStat chan<- int, messageChannelID 
 	}
 
 	songPath := songInstance.songPath
-	playingMsg := songInstance.title + " " + songInstance.artist
-	vi.sendFileWithMessage(messageChannelID, playingMsg, songInstance.coverPath)
+	_, err = vi.sendEmbedNowPlayingMessage(messageChannelID, songInstance)
+	if err != nil {
+		log.Println(err)
+	}
+	//vi.sendFileWithMessage(messageChannelID, playingMsg, songInstance.coverPath)
 	go vi.playAudioFile(songPath, stop)
 	stat := <-stop
 
@@ -841,32 +850,17 @@ func (vi *VoiceInstance) stopSong(m *discordgo.MessageCreate) {
 }
 
 //showPlayQueue sends the songs in the play queue to given channel ID.
-//TODO: when downloading songs in the download queue vi.playQueue is empty
-//this cause in showPlayQueue func to empty queue error.
 func (vi *VoiceInstance) showPlayQueue(m *discordgo.MessageCreate) {
-	items, err := vi.playQueue.PeekAll()
-	if err != nil {
-		log.Println(err)
-		vi.sendErrorMessageToChannel(m.ChannelID)
+	if vi.playQueue.Empty() {
+		vi.sendMessageToChannel(m.ChannelID, "Play queue is empty.")
 		return
 	}
 
-	displayQueueText := "Next Songs: \n"
-
-	for index := range items {
-		instance := getSongInstanceFromInterface(items[index])
-		if instance == nil {
-			log.Println("Error while converting interface {} to SongInstance{}.")
-			vi.sendErrorMessageToChannel(m.ChannelID)
-			return
-		}
-
-		songTitle := instance.title + " " + instance.artist
-		displayQueueText += songTitle + "\n"
+	_, err := vi.sendEmbedPlayQueueMessage(m.ChannelID)
+	if err != nil {
+		vi.sendErrorMessageToChannel(m.ChannelID)
+		return
 	}
-
-	vi.sendMessageToChannel(m.ChannelID, displayQueueText)
-	return
 }
 
 //sendMessageToChannel sends the text to channel that given id.
@@ -918,6 +912,9 @@ func (vi *VoiceInstance) sentMessageEditEmbed(channelID, messageID string, searc
 			},
 		},
 		Timestamp: time.Now().Format(time.RFC3339),
+		Image: &discordgo.MessageEmbedImage{
+			URL: searchResult.CoverPath,
+		},
 	}
 	_, err := vi.session.ChannelMessageEditEmbed(channelID, messageID, embed)
 	if err != nil {
@@ -925,6 +922,56 @@ func (vi *VoiceInstance) sentMessageEditEmbed(channelID, messageID string, searc
 		return
 	}
 	return
+}
+
+func (vi *VoiceInstance) sendEmbedNowPlayingMessage(channelID string, songInstance *SongInstance) (string, error) {
+	embed := &discordgo.MessageEmbed{
+		Author: &discordgo.MessageEmbedAuthor{},
+		Color:  0x26e232,
+		Fields: []*discordgo.MessageEmbedField{
+			&discordgo.MessageEmbedField{
+				Name: "Now Playing",
+				Value: formatEmbededLinkText(songInstance.title,
+					songInstance.duration,
+					songInstance.videoID),
+				Inline: false,
+			},
+		},
+		Timestamp: time.Now().Format(time.RFC3339),
+		Image: &discordgo.MessageEmbedImage{
+			URL: songInstance.coverUrl,
+		},
+	}
+
+	message, err := vi.session.ChannelMessageSendEmbed(channelID, embed)
+	if err != nil {
+		return "", fmt.Errorf("Error while sending now playing embed message: %v", err)
+	}
+
+	return message.ID, nil
+}
+
+//sendEmbedPlayQueueMessage sends an embeded message that contains
+//next songs in the playlist to the given channel ID.
+func (vi *VoiceInstance) sendEmbedPlayQueueMessage(channelID string) (string, error) {
+	fields, err := createMessageEmbedFieldsPlayQueue()
+	if err != nil {
+		vi.sendErrorMessageToChannel(channelID)
+		return "", fmt.Errorf("Error while creating message embed play queue: %v", err)
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Author:    &discordgo.MessageEmbedAuthor{},
+		Color:     0xff5733,
+		Fields:    fields,
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+
+	message, err := vi.sendEmbeddedMessageToChannel(channelID, embed)
+	if err != nil {
+		return "", fmt.Errorf("Error while sending embedded play queue message to channel: %v", err)
+	}
+	return message.ID, nil
 }
 
 //sendEmbeddedMessageToChannel sends embedded message to given channel.
@@ -970,6 +1017,30 @@ func createMessageEmbedFields(searchResults *[]youtube.SearchResult) []*discordg
 	}
 
 	return messageEmbedFields
+}
+
+//createMessageEmbedFieldsPlayQueue is a helper function to sendEmbedPlayQueueMessage func
+//to create MessageEmbedField array.
+func createMessageEmbedFieldsPlayQueue() ([]*discordgo.MessageEmbedField, error) {
+	messageEmbedFields := []*discordgo.MessageEmbedField{}
+
+	items, err := vi.playQueue.PeekAll()
+	if err != nil {
+		return nil, err
+	}
+	for _, element := range items {
+		instance := getSongInstanceFromInterface(element)
+		if instance == nil {
+			continue
+		}
+		embedField := &discordgo.MessageEmbedField{
+			Name:   "Play Queue:",
+			Value:  formatEmbededLinkText(instance.title, instance.duration, instance.videoID),
+			Inline: false,
+		}
+		messageEmbedFields = append(messageEmbedFields, embedField)
+	}
+	return messageEmbedFields, nil
 }
 
 //formatEmbededLinkText is a helper function to create embeded link text.
@@ -1025,6 +1096,7 @@ func getSongInstanceFromInterface(object interface{}) *SongInstance {
 			coverUrl:  inst.coverUrl,
 			coverPath: inst.coverPath,
 			videoID:   inst.videoID,
+			duration:  inst.duration,
 		}
 		return &newInstance
 	}
