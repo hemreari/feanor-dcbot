@@ -182,6 +182,9 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if strings.Compare(m.Content, "!show") == 0 {
 		vi.showPlayQueue(m)
 	}
+
+	if strings.Compare(m.Content, "!testreddit") == 0 {
+	}
 }
 
 func (vi *VoiceInstance) validateMessage(s *discordgo.Session, m *discordgo.MessageCreate) (*discordgo.Guild, error) {
@@ -460,18 +463,37 @@ func (vi *VoiceInstance) playQueueFunc(channelID string) {
 		vi.disconnectBot()
 	}()
 
-	wg := sync.WaitGroup{}
-
 	chanPlayStat := make(chan int)
 	for {
 		if !vi.downloadQueue.Empty() {
-			for worker := 0; worker < 3; worker++ {
-				wg.Add(1)
-				go func(worker int) {
-					defer wg.Done()
-					vi.processDownloadQueue(channelID)
-				}(worker)
+			maxNumberofGoroutines := 2
+
+			conGoroutines := make(chan struct{}, maxNumberofGoroutines)
+
+			for i := 0; i < maxNumberofGoroutines; i++ {
+				conGoroutines <- struct{}{}
 			}
+
+			doneLimitChan := make(chan bool)
+			waitForAllJobs := make(chan bool)
+
+			go func() {
+				for i := 0; i < int(vi.downloadQueue.Len()); i++ {
+					<-doneLimitChan
+					conGoroutines <- struct{}{}
+				}
+				waitForAllJobs <- true
+			}()
+
+			for i := 1; i <= int(vi.downloadQueue.Len()); i++ {
+				<-conGoroutines
+				go func(id int) {
+					vi.processDownloadQueue(channelID)
+					doneLimitChan <- true
+				}(i)
+			}
+
+			<-waitForAllJobs
 		}
 
 		//isPlaying is false means that bot is not  playing any song
