@@ -31,6 +31,7 @@ const (
 	frameSize        int    = 960                 // uint16 size of each audio frame
 	maxBytes         int    = (frameSize * 2) * 2 // max size of opus data
 	youtubeUrlPrefix string = "https://www.youtube.com/watch?v="
+	DefaultCoverPath string = "https://github.com/golang/go/blob/master/doc/gopher/fiveyears.jpg"
 )
 
 type VoiceInstance struct {
@@ -562,7 +563,7 @@ func (vi *VoiceInstance) processDownloadQueue(channelID string) {
 	coverPath, err = util.GetCoverImage(songInstance.coverUrl)
 	if err != nil {
 		log.Println(err)
-		coverPath = "default.jpg"
+		coverPath = DefaultCoverPath
 	}
 
 	songInstance.songPath = searchResult.VideoPath
@@ -579,7 +580,7 @@ func (vi *VoiceInstance) downloadSelection(searchResult *youtube.SearchResult, c
 		return err
 	}
 
-	coverPath := "https://github.com/golang/go/blob/master/doc/gopher/fiveyears.jpg"
+	coverPath := DefaultCoverPath
 
 	songInstance := &SongInstance{
 		songPath:  songPath,
@@ -606,12 +607,13 @@ func (vi *VoiceInstance) downloadQuery(songInstance *SongInstance, channelID str
 	coverPath, err = util.GetCoverImage(songInstance.coverUrl)
 	if err != nil {
 		log.Println(err)
-		coverPath = "default.jpg"
+		coverPath = DefaultCoverPath
 	}
 
 	songInstance.songPath = searchResult.VideoPath
 	songInstance.coverPath = coverPath
 	songInstance.duration = searchResult.Duration
+	songInstance.videoID = searchResult.VideoID
 
 	vi.playQueue.Put(songInstance)
 	return nil
@@ -629,7 +631,7 @@ func (vi *VoiceInstance) downloadPlayQuery(query, channelID string) error {
 	songInstance := &SongInstance{
 		title:     searchResult.VideoTitle,
 		songPath:  searchResult.VideoPath,
-		coverPath: "default.jpg",
+		coverPath: DefaultCoverPath,
 		videoID:   searchResult.VideoID,
 	}
 
@@ -641,7 +643,7 @@ func (vi *VoiceInstance) processPlayQueue(playStat chan<- int, messageChannelID 
 	stop := make(chan int)
 	nextItem, err := vi.playQueue.Get(1)
 	if err != nil {
-		log.Printf("Error while getting item from playlist: %v", err)
+		log.Printf("Error while getting item from playlist queue: %v", err)
 		return
 	}
 

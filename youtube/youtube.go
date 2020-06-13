@@ -149,6 +149,7 @@ func (y *YoutubeAPI) DownloadVideo(searchResult *SearchResult) (string, error) {
 	log.Printf("Starting to download: %s\n", videoPath)
 
 	ytdlArgs := []string{
+		"--force-ipv4",
 		"-f",
 		"'bestaudio[ext=m4a]",
 		"-o",
@@ -176,9 +177,9 @@ func DownloadVideo(searchResult *SearchResult) (string, error) {
 	}
 
 	log.Printf("Starting to download: %s\n", videoTitle)
-	log.Println("video ID: ", searchResult.VideoID)
 
 	ytdlArgs := []string{
+		"--force-ipv4",
 		"-f",
 		"'bestaudio[ext=m4a]",
 		"-o",
