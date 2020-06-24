@@ -14,6 +14,10 @@ import (
 	"google.golang.org/api/youtube/v3"
 )
 
+const (
+	DefaultPlaylistItemCount int64 = 3
+)
+
 type YoutubeAPI struct {
 	DeveloperKey string
 }
@@ -168,12 +172,13 @@ func (y *YoutubeAPI) DownloadVideo(searchResult *SearchResult) (string, error) {
 	return videoPath, nil
 }
 
+//DownloadVideo downloads video and returns video path.
 func DownloadVideo(searchResult *SearchResult) (string, error) {
 	videoTitle := searchResult.VideoTitle
 	videoPath := videoTitle + ".m4a"
 
 	if searchResult.VideoID == "" {
-		return "", fmt.Errorf("Couldn't get a video ID.")
+		return "", fmt.Errorf("Couldn't find the video ID.")
 	}
 
 	log.Printf("Starting to download: %s\n", videoTitle)
@@ -211,7 +216,7 @@ func (y *YoutubeAPI) SearchDownload(query string) (*SearchResult, error) {
 	return searchRes, nil
 }
 
-//GetInfoByID returns video information about the given video id
+//GetInfoByID returns video information about the given video id.
 func (y *YoutubeAPI) GetInfoByID(id string) *SearchResult {
 	devKey := y.DeveloperKey
 
@@ -244,4 +249,28 @@ func (y *YoutubeAPI) GetInfoByID(id string) *SearchResult {
 		}
 	}
 	return nil
+}
+
+//GetYoutubePlaylistByID makes the api request to Youtube Data API to
+//get information about the given playlist ID.
+func (y *YoutubeAPI) GetYoutubePlaylistByID(playlistID string) (*youtube.PlaylistItemListResponse, error) {
+	devKey := y.DeveloperKey
+
+	client := &http.Client{
+		Transport: &transport.APIKey{Key: devKey},
+	}
+
+	service, err := youtube.New(client)
+	if err != nil {
+		return nil, fmt.Errorf("Error while creating new Youtube client: %v", err)
+	}
+
+	call := service.PlaylistItems.List("snippet").PlaylistId(playlistID).MaxResults(DefaultPlaylistItemCount)
+	response, err := call.Do()
+	if err != nil {
+		log.Println(err)
+		return nil, fmt.Errorf("Error while doing get Youtube playlist by ID request: %v", err)
+	}
+
+	return response, nil
 }

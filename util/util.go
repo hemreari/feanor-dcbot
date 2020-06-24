@@ -19,6 +19,11 @@ func init() {
 
 var letterRunes = []rune("abcdefghijklmnopqrstuvwxyz0123456789")
 var ytUrlRegex = `(?m)^(http(s)??\:\/\/)?(www\.)?((youtube\.com\/watch\?v=)|(youtu.be\/))([a-zA-Z0-9\-_])+`
+
+//var ytPlaylistUrlRegex = `/^.*(youtu.be\/|list=)([^#\&\?]*).*/`
+var ytPlaylistUrlRegex = `^.*(youtube.com\/playlist\?list=)([^#\&\?]*)`
+
+//var ytPlaylistUrlRegex = `^https?:\/\/(www.youtube.com|youtube.com)\/playlist(.*)$`
 var durationRegex = `P(?P<years>\d+Y)?(?P<months>\d+M)?(?P<days>\d+D)?T?(?P<hours>\d+H)?(?P<minutes>\d+M)?(?P<seconds>\d+S)?`
 
 func RandStringRunes(n int) string {
@@ -83,6 +88,16 @@ func GetYtVideoID(url string) string {
 	return strings.TrimPrefix(url, "https://www.youtube.com/watch?v=")
 }
 
+//GetYoutubePlaylistID trims youtube playlist id from the url.
+//Checks given url if it is not playlist url return empty string ("")
+//otherwise trims playlist id and returns.
+func GetYoutubePlaylistID(url string) string {
+	if !ValidateYoutubePlaylistUrl(url) {
+		return ""
+	}
+	return strings.TrimPrefix(url, "https://www.youtube.com/playlist?list=")
+}
+
 //GetCoverImage downloads album cover image from the
 //given url and returns its path.
 func GetCoverImage(coverUrl string) (string, error) {
@@ -107,13 +122,24 @@ func GetCoverImage(coverUrl string) (string, error) {
 	return imgFileName, nil
 }
 
-//ValiadateYtUrl validates whether given url is a youtube url or not.
-func ValidateYtUrl(url string) bool {
+//ValiadateYoutubeUrl validates whether given url is a youtube url or not.
+func ValidateYoutubeUrl(url string) bool {
 	r, err := regexp.Compile(ytUrlRegex)
 	if err != nil {
 		log.Println(err)
 		return false
 	}
+	return r.MatchString(url)
+}
+
+//ValidateYoutubePlaylistUrl validates whether given url is a youtube playlist url or not.
+func ValidateYoutubePlaylistUrl(url string) bool {
+	r, err := regexp.Compile(ytPlaylistUrlRegex)
+	if err != nil {
+		log.Println(err)
+		return false
+	}
+
 	return r.MatchString(url)
 }
 
