@@ -440,7 +440,7 @@ func (vi *VoiceInstance) prepYoutubePlaylist(link string, s *discordgo.Session, 
 	vi.playQueueFuncByID(m.ChannelID)
 }
 
-//prepQuery preperas simple queries like "rammstein deutschland" to play.
+//prepQuery preperas simple queries like "michael jackson billie jean" to play.
 func (vi *VoiceInstance) prepQuery(query string, s *discordgo.Session, m *discordgo.MessageCreate) {
 	guild, err := vi.validateMessage(s, m)
 	if err != nil {
@@ -728,29 +728,11 @@ func (vi *VoiceInstance) processDownloadQueue(channelID string) {
 		return
 	}
 
-	query := songInstance.artist + songInstance.title
-
-	searchResult, err := yt.SearchDownload(query)
+	err = vi.downloadQuery(songInstance, channelID)
 	if err != nil {
 		log.Println(err)
-		log.Printf("Putting %s to the error queue.", query)
-		//vi.sendMessageToChannel(channelID, "Query is insufficient to find a result. Try again.")
-		vi.errQueue.Put(query)
 		return
 	}
-
-	var coverPath string
-	coverPath, err = util.GetCoverImage(songInstance.coverUrl)
-	if err != nil {
-		log.Println(err)
-		coverPath = DefaultCoverPath
-	}
-
-	songInstance.songPath = searchResult.VideoPath
-	songInstance.coverPath = coverPath
-
-	vi.playQueue.Put(songInstance)
-	return
 }
 
 //processDownloadQueueByVideoID handles download queue created by prepYoutubePlaylist function.
@@ -811,8 +793,6 @@ func (vi *VoiceInstance) downloadQuery(songInstance *SongInstance, channelID str
 	searchResult, err := yt.SearchDownload(query)
 	if err != nil {
 		vi.sendMessageToChannel(channelID, "Query is insufficient to find a result. Try again.")
-		log.Printf("Putting %s to the error queue.", query)
-		vi.errQueue.Put(query)
 		return err
 	}
 
@@ -868,6 +848,7 @@ func (vi *VoiceInstance) downloadPlayQuery(query, channelID string) error {
 		songPath:  searchResult.VideoPath,
 		coverPath: DefaultCoverPath,
 		videoID:   searchResult.VideoID,
+		duration:  searchResult.Duration,
 	}
 
 	vi.playQueue.Put(songInstance)
