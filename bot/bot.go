@@ -425,13 +425,14 @@ func (vi *VoiceInstance) prepYoutubePlaylist(link string, s *discordgo.Session, 
 	//add tracks to download queue.
 	for _, playlistItem := range response.Items {
 		videoID := playlistItem.Snippet.ResourceId.VideoId
-		log.Println(videoID)
+		videoTitle := playlistItem.Snippet.Title
 		songInstance := SongInstance{
 			videoID: videoID,
+			title:   videoTitle,
 		}
 
 		if vi.playQueue.Empty() {
-			_ = vi.downloadByVideoID(videoID)
+			_ = vi.downloadByVideoID(&songInstance)
 			continue
 		}
 		vi.downloadQueue.Put(&songInstance)
@@ -756,14 +757,15 @@ func (vi *VoiceInstance) processDownloadQueueByVideoID(channelID string) {
 	}
 
 	searchResult := yt.GetInfoByID(songInstance.videoID)
-	_, err = youtube.DownloadVideo(searchResult)
+	videoPath, err := youtube.DownloadVideo(searchResult)
 	if err != nil {
 		log.Println(err)
 		return
 	}
 
-	songInstance.songPath = searchResult.VideoPath
-	songInstance.coverPath = DefaultCoverPath
+	songInstance.songPath = videoPath
+	songInstance.coverUrl = DefaultCoverUrl
+	songInstance.duration = searchResult.Duration
 
 	vi.playQueue.Put(songInstance)
 	return
@@ -781,6 +783,7 @@ func (vi *VoiceInstance) downloadSelection(searchResult *youtube.SearchResult, c
 	songInstance := &SongInstance{
 		songPath:  songPath,
 		coverPath: coverPath,
+		coverUrl:  DefaultCoverUrl,
 	}
 
 	vi.playQueue.Put(songInstance)
@@ -816,19 +819,17 @@ func (vi *VoiceInstance) downloadQuery(songInstance *SongInstance, channelID str
 //downloadByVideoID downloads a video which is id is known.
 //when download process is finished, adds downloaded song to
 //the play queue.
-func (vi *VoiceInstance) downloadByVideoID(videoID string) error {
-	searchResult := yt.GetInfoByID(videoID)
+func (vi *VoiceInstance) downloadByVideoID(songInstance *SongInstance) error {
+	searchResult := yt.GetInfoByID(songInstance.videoID)
 	videoPath, err := youtube.DownloadVideo(searchResult)
 	if err != nil {
 		return fmt.Errorf("Error while download video by ID: %v", err)
 	}
 
-	songInstance := &SongInstance{
-		title:    searchResult.VideoTitle,
-		songPath: videoPath,
-		coverUrl: DefaultCoverUrl,
-		videoID:  videoID,
-	}
+	songInstance.songPath = videoPath
+	songInstance.coverUrl = DefaultCoverUrl
+	songInstance.coverPath = DefaultCoverPath
+	songInstance.duration = searchResult.Duration
 
 	vi.playQueue.Put(songInstance)
 	return nil
@@ -870,6 +871,7 @@ func (vi *VoiceInstance) processPlayQueue(playStat chan<- int, messageChannelID 
 	}
 
 	songPath := songInstance.songPath
+	coverPath := songInstance.coverPath
 	_, err = vi.sendEmbedNowPlayingMessage(messageChannelID, songInstance)
 	if err != nil {
 		log.Println(err)
@@ -879,12 +881,15 @@ func (vi *VoiceInstance) processPlayQueue(playStat chan<- int, messageChannelID 
 	stat := <-stop
 
 	if stat == 0 || stat == 1 {
-		errDeleteFile := util.DeleteFile(songPath)
-		if err != nil {
-			log.Println(errDeleteFile)
-		} else {
-			log.Printf("%s is deleted.", songPath)
-		}
+		util.DeleteSoundAndCoverFile(songPath, coverPath)
+		/*
+				errDeleteFile := util.DeleteFile(songPath)
+			if err != nil {
+				log.Println(errDeleteFile)
+			} else {
+				log.Printf("%s is deleted.", songPath)
+			}
+		*/
 	}
 	playStat <- stat
 }

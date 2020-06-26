@@ -58,6 +58,23 @@ func DeleteFile(path string) error {
 	return nil
 }
 
+//DeleteSoundAndCoverFile deletes given sound file and cover file.
+func DeleteSoundAndCoverFile(soundFilePath, coverFilePath string) {
+	err := DeleteFile(soundFilePath)
+	if err != nil {
+		log.Printf("Error while deleting sound file %s: %v\n", soundFilePath, err)
+	} else {
+		log.Printf("%s is deleted.", soundFilePath)
+	}
+
+	errCover := DeleteFile(coverFilePath)
+	if errCover != nil {
+		log.Printf("Error while deleting cover file %s: %v\n", coverFilePath, err)
+	} else {
+		log.Printf("%s is deleted.", coverFilePath)
+	}
+}
+
 //GetSpotifyPlaylistID returns playlist ID
 //from the given url
 //TODO: Error checking
