@@ -36,14 +36,15 @@ const (
 )
 
 type VoiceInstance struct {
-	dgv           *discordgo.VoiceConnection
-	session       *discordgo.Session
-	stop          bool
-	skip          bool
-	isPlaying     bool
-	playQueue     *queue.Queue
-	downloadQueue *queue.Queue
-	errQueue      *queue.Queue
+	dgv                 *discordgo.VoiceConnection
+	session             *discordgo.Session
+	stop                bool
+	skip                bool
+	isPlaying           bool
+	playQueue           *queue.Queue
+	downloadQueue       *queue.Queue
+	errQueue            *queue.Queue
+	nowPlayingMessageID string
 }
 
 type SongInstance struct {
@@ -68,6 +69,7 @@ var (
 func InitBot(botToken string, ytAPI *youtube.YoutubeAPI, config *config.Config) error {
 	yt = ytAPI
 	cfg = config
+
 	dg, err := discordgo.New("Bot " + botToken)
 	if err != nil {
 		return fmt.Errorf("Error while creating discord session: %v", err)
@@ -87,14 +89,15 @@ func InitBot(botToken string, ytAPI *youtube.YoutubeAPI, config *config.Config) 
 	errQueue := createNewQueue()
 
 	vi = &VoiceInstance{
-		session:       dg,
-		dgv:           nil,
-		stop:          false,
-		skip:          false,
-		isPlaying:     false,
-		playQueue:     playQueue,
-		downloadQueue: downloadQueue,
-		errQueue:      errQueue,
+		session:             dg,
+		dgv:                 nil,
+		stop:                false,
+		skip:                false,
+		isPlaying:           false,
+		playQueue:           playQueue,
+		downloadQueue:       downloadQueue,
+		errQueue:            errQueue,
+		nowPlayingMessageID: "",
 	}
 
 	log.Println("Feanor is running. Press Ctrl-C to exit.")
@@ -145,6 +148,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		if query == "" {
 			return
 		}
+
 		if util.ValidateYoutubeUrl(query) {
 			vi.prepYoutubeUrl(query, s, m)
 		}
@@ -154,6 +158,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	if strings.HasPrefix(m.Content, "!list") {
 		link := strings.Trim(m.Content, "!list ")
+
 		//handle spotify playlist
 		if strings.Contains(link, "spotify") {
 			playlistID := util.GetSpotifyPlaylistID(link)
@@ -211,21 +216,6 @@ func (vi *VoiceInstance) validateMessage(s *discordgo.Session, m *discordgo.Mess
 	}
 
 	return g, nil
-
-	/*
-		for _, vs := range g.VoiceStates {
-			if vs.UserID == m.Author.ID {
-				dgv, err := s.ChannelVoiceJoin(g.ID, vs.ChannelID, false, true)
-				vi.dgv = dgv
-				if err != nil {
-					fmt.Printf("Couldn't join the voice channel: %v\n", err)
-					return false
-				}
-				return true
-			}
-		}
-		return false
-	*/
 }
 
 //validateUserVoiceState returns true if the user that wrote the message is in
@@ -613,12 +603,17 @@ func (vi *VoiceInstance) playQueueFunc(channelID string) {
 			go vi.processPlayQueue(chanPlayStat, channelID)
 		}
 		//if download queue is empty, there is no other jobs to run
-		//we can just wait to end the play job.
+		//we can just wait for it to finish the play job.
 		if vi.downloadQueue.Empty() {
 			playStat := <-chanPlayStat
 			log.Println("playStat:", playStat)
 			if playStat == 0 {
 				vi.sendMessageToChannel(channelID, "See you later.")
+
+				//play process is finished so we can set nowPlayingMessageID
+				//to empty string to trigger send new now playing message in
+				//new play process.
+				vi.nowPlayingMessageID = ""
 				return
 			}
 		} else {
@@ -872,24 +867,16 @@ func (vi *VoiceInstance) processPlayQueue(playStat chan<- int, messageChannelID 
 
 	songPath := songInstance.songPath
 	coverPath := songInstance.coverPath
-	_, err = vi.sendEmbedNowPlayingMessage(messageChannelID, songInstance)
+
+	err = vi.sendEmbedNowPlayingMessage(messageChannelID, songInstance)
 	if err != nil {
 		log.Println(err)
 	}
-	//vi.sendFileWithMessage(messageChannelID, playingMsg, songInstance.coverPath)
 	go vi.playAudioFile(songPath, stop)
 	stat := <-stop
 
 	if stat == 0 || stat == 1 {
 		util.DeleteSoundAndCoverFile(songPath, coverPath)
-		/*
-				errDeleteFile := util.DeleteFile(songPath)
-			if err != nil {
-				log.Println(errDeleteFile)
-			} else {
-				log.Printf("%s is deleted.", songPath)
-			}
-		*/
 	}
 	playStat <- stat
 }
@@ -1169,7 +1156,33 @@ func (vi *VoiceInstance) sentMessageEditEmbed(channelID, messageID string, searc
 	return
 }
 
-func (vi *VoiceInstance) sendEmbedNowPlayingMessage(channelID string, songInstance *SongInstance) (string, error) {
+func (vi *VoiceInstance) sendEmbedNowPlayingMessage(channelID string, songInstance *SongInstance) error {
+	embedContent := vi.createEmbedNowPlayingMessage(songInstance)
+
+	//if vi.nowPlayingMessageID is a empty string than
+	//we have to create a new embed message.
+	//otherwise, edit last now playing message instead
+	//of creating a new now playing message.
+	if vi.nowPlayingMessageID == "" {
+		message, err := vi.session.ChannelMessageSendEmbed(channelID, embedContent)
+		if err != nil {
+			return fmt.Errorf("Error while sending now playing embed message: %v", err)
+		}
+
+		vi.nowPlayingMessageID = message.ID
+		return nil
+	} else {
+		_, err := vi.session.ChannelMessageEditEmbed(channelID, vi.nowPlayingMessageID, embedContent)
+		if err != nil {
+			return fmt.Errorf("Error while sending edited embed message: %v", err)
+		}
+		return nil
+	}
+}
+
+//createEmbedNowPlayingMessage creates a discordgo.MessageEmbed struct, required when sending embed
+//messages, with the given songInstance struct contents.
+func (vi *VoiceInstance) createEmbedNowPlayingMessage(songInstance *SongInstance) *discordgo.MessageEmbed {
 	embed := &discordgo.MessageEmbed{
 		Author: &discordgo.MessageEmbedAuthor{},
 		Color:  0x26e232,
@@ -1188,12 +1201,7 @@ func (vi *VoiceInstance) sendEmbedNowPlayingMessage(channelID string, songInstan
 		},
 	}
 
-	message, err := vi.session.ChannelMessageSendEmbed(channelID, embed)
-	if err != nil {
-		return "", fmt.Errorf("Error while sending now playing embed message: %v", err)
-	}
-
-	return message.ID, nil
+	return embed
 }
 
 //sendEmbedPlayQueueMessage sends an embeded message that contains
