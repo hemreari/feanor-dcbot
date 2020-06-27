@@ -1206,6 +1206,7 @@ func (vi *VoiceInstance) sendEmbedPlayQueueMessage(channelID string) (string, er
 	}
 
 	embed := &discordgo.MessageEmbed{
+		Title:     "Play Queue:",
 		Author:    &discordgo.MessageEmbedAuthor{},
 		Color:     0xff5733,
 		Fields:    fields,
@@ -1273,17 +1274,21 @@ func createMessageEmbedFieldsPlayQueue() ([]*discordgo.MessageEmbedField, error)
 	if err != nil {
 		return nil, err
 	}
+
+	counter := 1
+
 	for _, element := range items {
 		instance := getSongInstanceFromInterface(element)
 		if instance == nil {
 			continue
 		}
 		embedField := &discordgo.MessageEmbedField{
-			Name:   "Play Queue:",
+			Name:   strconv.Itoa(counter) + ")",
 			Value:  formatEmbededLinkText(instance.title, instance.duration, instance.videoID),
 			Inline: false,
 		}
 		messageEmbedFields = append(messageEmbedFields, embedField)
+		counter++
 	}
 	return messageEmbedFields, nil
 }
