@@ -2,6 +2,7 @@ package bot
 
 import (
 	"bufio"
+	"container/list"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -45,6 +46,7 @@ type VoiceInstance struct {
 	downloadQueue       *queue.Queue
 	errQueue            *queue.Queue
 	nowPlayingMessageID string
+	playHistoryList     *list.List
 }
 
 type SongInstance struct {
@@ -98,6 +100,7 @@ func InitBot(botToken string, ytAPI *youtube.YoutubeAPI, config *config.Config) 
 		downloadQueue:       downloadQueue,
 		errQueue:            errQueue,
 		nowPlayingMessageID: "",
+		playHistoryList:     list.New(),
 	}
 
 	log.Println("Feanor is running. Press Ctrl-C to exit.")
@@ -475,7 +478,7 @@ func (vi *VoiceInstance) prepYoutubeUrl(url string, s *discordgo.Session, m *dis
 }
 
 func (vi *VoiceInstance) prepPlay(query string, s *discordgo.Session, m *discordgo.MessageCreate) {
-	// Find the channel that the message came from.
+	// Find the channel where the message came from.
 	c, err := s.State.Channel(m.ChannelID)
 	if err != nil {
 		log.Printf("Couldn't find channel: %v\n", err)
@@ -875,7 +878,14 @@ func (vi *VoiceInstance) processPlayQueue(playStat chan<- int, messageChannelID 
 	go vi.playAudioFile(songPath, stop)
 	stat := <-stop
 
+	vi.playHistoryList.PushBack(songInstance)
+
 	if stat == 0 || stat == 1 {
+		embedPlayHistoryErr := vi.sendEmbedPlayHistory(messageChannelID)
+		if embedPlayHistoryErr != nil {
+			log.Println(embedPlayHistoryErr)
+		}
+		vi.playHistoryList = list.New()
 		util.DeleteSoundAndCoverFile(songPath, coverPath)
 	}
 	playStat <- stat
@@ -1156,8 +1166,32 @@ func (vi *VoiceInstance) sentMessageEditEmbed(channelID, messageID string, searc
 	return
 }
 
+func (vi *VoiceInstance) sendEmbedPlayHistory(channelID string) error {
+	var items []interface{}
+	for e := vi.playHistoryList.Front(); e != nil; e = e.Next() {
+		items = append(items, e.Value)
+	}
+
+	fields := createMessageEmbedFieldsPlayQueue(items)
+
+	embed := &discordgo.MessageEmbed{
+		Title:     "Played Songs:",
+		Author:    &discordgo.MessageEmbedAuthor{},
+		Color:     0xff5733,
+		Fields:    fields,
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+
+	_, err := vi.session.ChannelMessageEditEmbed(channelID, vi.nowPlayingMessageID, embed)
+	if err != nil {
+		vi.sendErrorMessageToChannel(channelID)
+		return fmt.Errorf("Error while sending embed Play history message: %v", err)
+	}
+	return nil
+}
+
 func (vi *VoiceInstance) sendEmbedNowPlayingMessage(channelID string, songInstance *SongInstance) error {
-	embedContent := vi.createEmbedNowPlayingMessage(songInstance)
+	embedContent := createEmbedNowPlayingMessage(songInstance)
 
 	//if vi.nowPlayingMessageID is a empty string than
 	//we have to create a new embed message.
@@ -1182,7 +1216,7 @@ func (vi *VoiceInstance) sendEmbedNowPlayingMessage(channelID string, songInstan
 
 //createEmbedNowPlayingMessage creates a discordgo.MessageEmbed struct, required when sending embed
 //messages, with the given songInstance struct contents.
-func (vi *VoiceInstance) createEmbedNowPlayingMessage(songInstance *SongInstance) *discordgo.MessageEmbed {
+func createEmbedNowPlayingMessage(songInstance *SongInstance) *discordgo.MessageEmbed {
 	embed := &discordgo.MessageEmbed{
 		Author: &discordgo.MessageEmbedAuthor{},
 		Color:  0x26e232,
@@ -1207,11 +1241,13 @@ func (vi *VoiceInstance) createEmbedNowPlayingMessage(songInstance *SongInstance
 //sendEmbedPlayQueueMessage sends an embeded message that contains
 //next songs in the playlist to the given channel ID.
 func (vi *VoiceInstance) sendEmbedPlayQueueMessage(channelID string) (string, error) {
-	fields, err := createMessageEmbedFieldsPlayQueue()
+	items, err := vi.playQueue.PeekAll()
 	if err != nil {
 		vi.sendErrorMessageToChannel(channelID)
 		return "", fmt.Errorf("Error while creating message embed play queue: %v", err)
 	}
+
+	fields := createMessageEmbedFieldsPlayQueue(items)
 
 	embed := &discordgo.MessageEmbed{
 		Title:     "Play Queue:",
@@ -1275,21 +1311,17 @@ func createMessageEmbedFields(searchResults *[]youtube.SearchResult) []*discordg
 
 //createMessageEmbedFieldsPlayQueue is a helper function to sendEmbedPlayQueueMessage func
 //to create MessageEmbedField array.
-func createMessageEmbedFieldsPlayQueue() ([]*discordgo.MessageEmbedField, error) {
+func createMessageEmbedFieldsPlayQueue(songInstInterfaceArray []interface{}) []*discordgo.MessageEmbedField {
 	messageEmbedFields := []*discordgo.MessageEmbedField{}
-
-	items, err := vi.playQueue.PeekAll()
-	if err != nil {
-		return nil, err
-	}
 
 	counter := 1
 
-	for _, element := range items {
+	for _, element := range songInstInterfaceArray {
 		instance := getSongInstanceFromInterface(element)
 		if instance == nil {
 			continue
 		}
+
 		embedField := &discordgo.MessageEmbedField{
 			Name:   strconv.Itoa(counter) + ")",
 			Value:  formatEmbededLinkText(instance.title, instance.duration, instance.videoID),
@@ -1298,7 +1330,7 @@ func createMessageEmbedFieldsPlayQueue() ([]*discordgo.MessageEmbedField, error)
 		messageEmbedFields = append(messageEmbedFields, embedField)
 		counter++
 	}
-	return messageEmbedFields, nil
+	return messageEmbedFields
 }
 
 //formatEmbededLinkText is a helper function to create embeded link text.
