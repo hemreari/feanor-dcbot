@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	DefaultPlaylistItemCount int64 = 3
+	DefaultPlaylistItemCount int64 = 20
 )
 
 type YoutubeAPI struct {
