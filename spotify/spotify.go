@@ -46,6 +46,21 @@ type SpotifyPlaylistTracks struct {
 	Total    int         `json:"total"`
 }
 
+type SpotifyAlbumTracks struct {
+	Name   string `json:"name"` //album name
+	Images []struct {
+		Url string `json:"url"` //album image url
+	} `json:"images"`
+	Tracks struct {
+		Items []struct {
+			Name    string `json:"name"` //track name
+			Artists []struct {
+				Name string `json:"name"` //track artist name
+			} `json:"Artists"`
+		} `json:"items"`
+	} `json:"tracks"`
+}
+
 type SpotifyPlaylistInfo struct {
 	Name  string `json:"name"`
 	Owner struct {
@@ -82,7 +97,7 @@ func NewSpotifyAPI(clientID, clientSecretID string) *SpotifyAPI {
 	}
 }
 
-//getAPIToken returns spotify oauth token
+//getAPIToken returns Spotify oauth token
 func (s *SpotifyAPI) getAPIToken() (*oauth2.Token, error) {
 	ctx := context.Background()
 	conf := &clientcredentials.Config{
@@ -98,19 +113,25 @@ func (s *SpotifyAPI) getAPIToken() (*oauth2.Token, error) {
 	return tok, nil
 }
 
-//getTracksFromPlaylist sends request to get information about playlist's track
-//information to Spotify API and decodes API response to SpotifyPlaylistTracks struct.
-func (s *SpotifyAPI) getTracksFromPlaylist(playlistID string) (*SpotifyPlaylistTracks, error) {
-	url := "https://api.spotify.com/v1/playlists/" + playlistID + "/tracks"
-	bearerToken := "Bearer " + s.BearerToken
-
-	req, err := http.NewRequest("GET", url, nil)
-	req.Header.Add("Authorization", bearerToken)
+func (s *SpotifyAPI) do(method, url string) (*http.Response, error) {
+	req, err := http.NewRequest(method, url, nil)
+	req.Header.Add("Authorization", "Bearer "+s.BearerToken)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
+	}
+	return resp, nil
+}
+
+//getTracksFromPlaylist sends request to get information about playlist's tracks
+//to Spotify API and decodes API response to SpotifyPlaylistTracks struct.
+func (s *SpotifyAPI) getTracksFromPlaylist(playlistID string) (*SpotifyPlaylistTracks, error) {
+	url := "https://api.spotify.com/v1/playlists/" + playlistID + "/tracks"
+	resp, err := s.do("GET", url)
+	if err != nil {
+		return nil, fmt.Errorf("Error while getting response from playlist tracks endpoint: %v", err)
 	}
 
 	// spotify playlist
@@ -127,22 +148,15 @@ func (s *SpotifyAPI) getTracksFromPlaylist(playlistID string) (*SpotifyPlaylistT
 
 //GetPlaylistInfo sends request to get information about playlist to
 //Spotify API and decodes API response to SpotifyPlaylistInfo struct.
-func (s *SpotifyAPI) GetPlaylistInfo(playlistID string) (*SpotifyPlaylistInfo, error) {
+func (s *SpotifyAPI) getPlaylistInfo(id string) (*SpotifyPlaylistInfo, error) {
 	url := "https://api.spotify.com/v1/playlists/" + playlistID
-	bearerToken := "Bearer " + s.BearerToken
 
-	req, err := http.NewRequest("GET", url, nil)
-	req.Header.Add("Authorization", bearerToken)
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := s.do("GET", url)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Error while getting playlist info: %v", err)
 	}
 
-	// spotify playlist
 	decoder := json.NewDecoder(resp.Body)
-
 	var spotifyPl SpotifyPlaylistInfo
 	err = decoder.Decode(&spotifyPl)
 	if err != nil {
@@ -150,6 +164,15 @@ func (s *SpotifyAPI) GetPlaylistInfo(playlistID string) (*SpotifyPlaylistInfo, e
 	}
 
 	return &spotifyPl, nil
+}
+
+//GetPlaylistInfo wrapper function of getPlaylistInfo function.
+func (s *SpotifyAPI) GetPlaylistInfo(id string) (*SpotifyPlaylistInfo, error) {
+	spotifyPlaylistInfo, err := s.getPlaylistInfo(id)
+	if err != nil {
+		return nil, err
+	}
+	return spotifyPlaylistInfo, nil
 }
 
 //GetPlaylist eliminates required information to create a download queue in the
@@ -181,16 +204,72 @@ func (s *SpotifyAPI) GetSpotifyPlaylist(id string) ([]SpotifyPlaylist, error) {
 			coverUrl = DefaultCoverUrl
 		}
 
-		artistName := ""
+		artistNames := ""
 		artists := value.Track.Artists
 		for artistIndex := range artists {
-			artistName += artists[artistIndex].Name + " "
+			artistNames += artists[artistIndex].Name + " "
 		}
 
 		spotifyPlaylist := SpotifyPlaylist{
 			TrackName:   trackName,
 			CoverUrl:    coverUrl,
-			ArtistNames: artistName,
+			ArtistNames: artistNames,
+		}
+
+		spotifyPlaylistList = append(spotifyPlaylistList, spotifyPlaylist)
+	}
+	return spotifyPlaylistList, nil
+}
+
+//getAlbumTracks sends request to get information about album's tracks to
+//Spotify API and decodes API Response to SpotifyAlbumTracks struct.
+func (s *SpotifyAPI) getAlbumTracks(id string) (*SpotifyAlbumTracks, error) {
+	url := "https://api.spotify.com/v1/albums/" + id
+
+	resp, err := s.do("GET", url)
+	if err != nil {
+		return nil, fmt.Errorf("Error while getting album tracks info: %v", err)
+	}
+
+	decoder := json.NewDecoder(resp.Body)
+	var spotifyAlbumTracks SpotifyAlbumTracks
+	err = decoder.Decode(&spotifyAlbumTracks)
+	if err != nil {
+		return nil, err
+	}
+
+	return &spotifyAlbumTracks, nil
+}
+
+//GetSpotifyAlbum eliminates required information to create a download queue in
+//the bot package from the getAlbumTracks function response  and creates a slice
+//of SpotifyPlaylist struct.
+func (s *SpotifyAPI) GetSpotifyAlbum(id string) ([]SpotifyPlaylist, error) {
+	spotifyAlbumTracks, err := s.getAlbumTracks(id)
+	if err != nil {
+		return nil, err
+	}
+
+	spotifyPlaylistList := []SpotifyPlaylist{}
+
+	coverUrl := spotifyAlbumTracks.Images[1].Url
+
+	tracks := spotifyAlbumTracks.Tracks
+
+	for i, value := range tracks.Items {
+		if i > 20 {
+			break
+		}
+
+		artistNames := ""
+		for _, artistValue := range value.Artists {
+			artistNames += artistValue.Name + " "
+		}
+
+		spotifyPlaylist := SpotifyPlaylist{
+			TrackName:   value.Name,
+			CoverUrl:    CoverUrl,
+			ArtistNames: artistNames,
 		}
 
 		spotifyPlaylistList = append(spotifyPlaylistList, spotifyPlaylist)
