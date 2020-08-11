@@ -13,18 +13,25 @@ import (
 	"time"
 )
 
+var (
+	letterRunes = []rune("abcdefghijklmnopqrstuvwxyz0123456789")
+	ytUrlRegex  = `(?m)^(http(s)??\:\/\/)?(www\.)?((youtube\.com\/watch\?v=)|(youtu.be\/))([a-zA-Z0-9\-_])+`
+
+	//var ytPlaylistUrlRegex = `/^.*(youtu.be\/|list=)([^#\&\?]*).*/`
+	ytPlaylistUrlRegex = `^.*(youtube.com\/playlist\?list=)([^#\&\?]*)`
+
+	//var ytPlaylistUrlRegex = `^https?:\/\/(www.youtube.com|youtube.com)\/playlist(.*)$`
+	durationRegex = `P(?P<years>\d+Y)?(?P<months>\d+M)?(?P<days>\d+D)?T?(?P<hours>\d+H)?(?P<minutes>\d+M)?(?P<seconds>\d+S)?`
+
+	//http spotify urls regex for track, album, playlist ID's (matching group number is 3)
+	spotifyHttpUrlRegex = `(?m)^(https:\/\/open.spotify.com\/(playlist\/|album\/|track\/)([a-zA-Z0-9]+))(.*)$`
+
+	spotifyIDRegex = `[a-zA-Z0-9]{22}`
+)
+
 func init() {
 	rand.Seed(time.Now().UnixNano())
 }
-
-var letterRunes = []rune("abcdefghijklmnopqrstuvwxyz0123456789")
-var ytUrlRegex = `(?m)^(http(s)??\:\/\/)?(www\.)?((youtube\.com\/watch\?v=)|(youtu.be\/))([a-zA-Z0-9\-_])+`
-
-//var ytPlaylistUrlRegex = `/^.*(youtu.be\/|list=)([^#\&\?]*).*/`
-var ytPlaylistUrlRegex = `^.*(youtube.com\/playlist\?list=)([^#\&\?]*)`
-
-//var ytPlaylistUrlRegex = `^https?:\/\/(www.youtube.com|youtube.com)\/playlist(.*)$`
-var durationRegex = `P(?P<years>\d+Y)?(?P<months>\d+M)?(?P<days>\d+D)?T?(?P<hours>\d+H)?(?P<minutes>\d+M)?(?P<seconds>\d+S)?`
 
 func RandStringRunes(n int) string {
 	b := make([]rune, n)
@@ -73,6 +80,17 @@ func DeleteSoundAndCoverFile(soundFilePath, coverFilePath string) {
 	} else {
 		log.Printf("%s is deleted.", coverFilePath)
 	}
+}
+
+//GetSpotifyID returns ID of playlist, album or track from the given URL.
+//("https://open.spotify.com/track/<ID>?si=NoAgqqb6Sp2vV-1IBzzM-g")
+func GetSpotifyID(url string) string {
+	re := regexp.MustCompile(spotifyHttpUrlRegex)
+	if re.MatchString(url) {
+		reId := regexp.MustCompile(spotifyIDRegex)
+		return reId.FindString(url)
+	}
+	return ""
 }
 
 //GetSpotifyPlaylistID returns playlist ID
@@ -148,6 +166,13 @@ func ValidateYoutubeUrl(url string) bool {
 	}
 	return r.MatchString(url)
 }
+
+/*
+//ValidateSpotifyTrackUrl validates whether given url is a Spotify track url or not.
+func ValidateSpotifyTrackUrl(url string) bool {
+
+}
+*/
 
 //ValidateYoutubePlaylistUrl validates whether given url is a youtube playlist url or not.
 func ValidateYoutubePlaylistUrl(url string) bool {

@@ -164,8 +164,7 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 		//handle spotify playlist
 		if strings.Contains(link, "spotify") {
-			playlistID := util.GetSpotifyPlaylistID(link)
-			vi.prepSpotifyPlaylist(playlistID, s, m)
+			vi.prepSpotifyPlaylist(link, s, m)
 		}
 
 		//handle youtube playlist
@@ -233,7 +232,8 @@ func (vi *VoiceInstance) validateUserVoiceState(s *discordgo.Session, m *discord
 	return false
 }
 
-func (vi *VoiceInstance) channelVoiceJoin(g *discordgo.Guild, s *discordgo.Session, m *discordgo.MessageCreate) bool {
+//channelVoiceJoin joins bot to the specified voice channel in VoiceInstance.
+func (vi *VoiceInstance) channelVoiceJoin(s *discordgo.Session, m *discordgo.MessageCreate, g *discordgo.Guild) bool {
 	for _, vs := range g.VoiceStates {
 		if vs.UserID == m.Author.ID {
 			dgv, err := s.ChannelVoiceJoin(g.ID, vs.ChannelID, false, true)
@@ -246,6 +246,31 @@ func (vi *VoiceInstance) channelVoiceJoin(g *discordgo.Guild, s *discordgo.Sessi
 		}
 	}
 	return false
+}
+
+//validateMessageAndJoinVoiceChannel validates user message by
+//calling validateMessage function if message is valid then joins
+//bot to the voice channel by calling JoinVoiceChannel function.
+//If bot is joined to the voice channel successfully, returns true;
+//otherwise false.
+func (vi *VoiceInstance) validateMessageAndJoinVoiceChannel(s *discordgo.Session, m *discordgo.MessageCreate) bool {
+	guild, err := vi.validateMessage(s, m)
+	if err != nil {
+		log.Println(err)
+		return false
+	}
+
+	if !vi.validateUserVoiceState(s, m, guild) {
+		log.Printf("Refusing request made by the user %s-%s: Not in the voice channel.\n",
+			m.Author.Username, m.Author.ID)
+		vi.sendMessageToChannel(m.ChannelID, "You have to be in the voice channel to do that command.")
+		return false
+	}
+
+	if !vi.channelVoiceJoin(s, m, guild) {
+		return false
+	}
+	return true
 }
 
 func (vi *VoiceInstance) searchOnYoutube(query string, s *discordgo.Session, m *discordgo.MessageCreate) {
@@ -293,32 +318,25 @@ func (vi *VoiceInstance) searchOnYoutube(query string, s *discordgo.Session, m *
 	})
 }
 
-//prepSpotifyPlaylist gets songs from the given Spotify playlist ID
+//prepSpotifyPlaylist gets tracks information from the given Spotify playlist URL
 //and parses them as youtube queries to add to the download queue.
 //finally starts the play process.
-func (vi *VoiceInstance) prepSpotifyPlaylist(playlistID string, s *discordgo.Session, m *discordgo.MessageCreate) {
-	guild, err := vi.validateMessage(s, m)
-	if err != nil {
-		log.Println(err)
+func (vi *VoiceInstance) prepSpotifyPlaylist(link string, s *discordgo.Session, m *discordgo.MessageCreate) {
+	if !vi.validateMessageAndJoinVoiceChannel(s, m) {
 		return
 	}
 
-	if !vi.validateUserVoiceState(s, m, guild) {
-		log.Printf("Refusing !search command request made by the user %s-%s: Not in the voice channel.\n",
-			m.Author.Username, m.Author.ID)
-		vi.sendMessageToChannel(m.ChannelID, "You have to be in the voice channel to do that command.")
+	id := util.GetSpotifyID(link)
+	if strings.Compare(id, "") == 0 {
+		log.Printf("Given URL \"%s\" is not an accepted spotify URL.\n", link)
+		vi.sendMessageToChannel(m.ChannelID, "Unexpected thing happend when playing the link. Try Again.")
 		return
 	}
 
-	if !vi.channelVoiceJoin(guild, s, m) {
-		return
-	}
-
-	//initialise spotify api.
+	//initialize spotify api.
 	spotifyAPI := initSpotifyAPI()
 
-	//get playlist tracks
-	plTracks, err := spotifyAPI.GetTracksFromPlaylist(playlistID)
+	playlistList, err := spotifyAPI.GetSpotifyPlaylist(id)
 	if err != nil {
 		log.Printf("Error while getting Spotify playlist tracks: %v", err)
 		vi.sendMessageToChannel(m.ChannelID, "Unexpected thing is happened. Please, Try again.")
@@ -331,45 +349,22 @@ func (vi *VoiceInstance) prepSpotifyPlaylist(playlistID string, s *discordgo.Ses
 		vi.stopSong(m)
 	}
 
-	itemCounter := 0
-
 	//parse playlist tracks to artist and track name.
-	items := plTracks.Items
-	for index := range items {
-		//for a single playlist, we are processing maximum 100 songs.
-		//It consumes %10.05 of daily quota limit.
-		if itemCounter > 20 {
-			break
-		}
-		trackName := items[index].Track.Name
-
-		var coverUrl string
-		album := items[index].Track.Album
-		if album.Images[1].Url != "" {
-			coverUrl = album.Images[1].Url
-		}
-
-		var artistsName string
-		artists := items[index].Track.Artists
-		for artistIndex := range artists {
-			artistsName += artists[artistIndex].Name + " "
-		}
-
+	for _, item := range playlistList {
 		songInstance := SongInstance{
-			title:    trackName,
-			artist:   artistsName,
-			coverUrl: coverUrl,
+			title:    item.TrackName,
+			artist:   item.ArtistNames,
+			coverUrl: item.CoverUrl,
 		}
 
-		//first query is not putting in to the download query
-		//it's directly downloading.
+		//first playlist track is not putting in to the download queue.
+		//it's going to be downloaded directly.
 		if vi.playQueue.Empty() {
 			_ = vi.downloadQuery(&songInstance, m.ChannelID)
-			itemCounter++
 			continue
 		}
+
 		vi.downloadQueue.Put(&songInstance)
-		itemCounter++
 	}
 
 	//start the play process.
@@ -377,20 +372,7 @@ func (vi *VoiceInstance) prepSpotifyPlaylist(playlistID string, s *discordgo.Ses
 }
 
 func (vi *VoiceInstance) prepYoutubePlaylist(link string, s *discordgo.Session, m *discordgo.MessageCreate) {
-	guild, err := vi.validateMessage(s, m)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	if !vi.validateUserVoiceState(s, m, guild) {
-		log.Printf("Refusing !search command request made by the user %s-%s: Not in the voice channel.\n",
-			m.Author.Username, m.Author.ID)
-		vi.sendMessageToChannel(m.ChannelID, "You have to be in the voice channel to do that command.")
-		return
-	}
-
-	if !vi.channelVoiceJoin(guild, s, m) {
+	if !vi.validateMessageAndJoinVoiceChannel(s, m) {
 		return
 	}
 
@@ -418,10 +400,13 @@ func (vi *VoiceInstance) prepYoutubePlaylist(link string, s *discordgo.Session, 
 	//add tracks to download queue.
 	for _, playlistItem := range response.Items {
 		videoID := playlistItem.Snippet.ResourceId.VideoId
+		thumbnailUrl := playlistItem.Snippet.Thumbnails.High.Url
 		videoTitle := playlistItem.Snippet.Title
+
 		songInstance := SongInstance{
-			videoID: videoID,
-			title:   videoTitle,
+			videoID:  videoID,
+			title:    videoTitle,
+			coverUrl: thumbnailUrl,
 		}
 
 		if vi.playQueue.Empty() {
@@ -434,23 +419,14 @@ func (vi *VoiceInstance) prepYoutubePlaylist(link string, s *discordgo.Session, 
 	vi.playQueueFuncByID(m.ChannelID)
 }
 
-//prepQuery preperas simple queries like "michael jackson billie jean" to play.
+//prepQuery prepares simple queries like "michael jackson billie jean" to play.
 func (vi *VoiceInstance) prepQuery(query string, s *discordgo.Session, m *discordgo.MessageCreate) {
-	guild, err := vi.validateMessage(s, m)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	if !vi.validateUserVoiceState(s, m, guild) {
-		log.Printf("Refusing !search command request made by the user %s-%s: Not in the voice channel.\n",
-			m.Author.Username, m.Author.ID)
-		vi.sendMessageToChannel(m.ChannelID, "You have to be in the voice channel to do that command.")
+	if !vi.validateMessageAndJoinVoiceChannel(s, m) {
 		return
 	}
 
 	if vi.isPlaying == false {
-		err = vi.downloadPlayQuery(query, m.ChannelID)
+		err := vi.downloadPlayQuery(query, m.ChannelID)
 		if err != nil {
 			log.Println(err)
 			return
@@ -462,9 +438,6 @@ func (vi *VoiceInstance) prepQuery(query string, s *discordgo.Session, m *discor
 		return
 	}
 
-	if !vi.channelVoiceJoin(guild, s, m) {
-		return
-	}
 	vi.playQueueFunc(m.ChannelID)
 	return
 }
@@ -522,20 +495,12 @@ func (vi *VoiceInstance) prepPlay(query string, s *discordgo.Session, m *discord
 }
 
 func (vi *VoiceInstance) prepSearchSelectionPlay(searchResult *youtube.SearchResult, s *discordgo.Session, m *discordgo.MessageCreate) {
-	guild, err := vi.validateMessage(s, m)
-	if err != nil {
-		return
-	}
-
-	if !vi.validateUserVoiceState(s, m, guild) {
-		log.Printf("Refusing !search command request made by the user %s-%s: Not in the voice channel.\n",
-			m.Author.Username, m.Author.ID)
-		vi.sendMessageToChannel(m.ChannelID, "You have to be in the voice channel to do that command.")
+	if !vi.validateMessageAndJoinVoiceChannel(s, m) {
 		return
 	}
 
 	if vi.isPlaying == false {
-		err = vi.downloadSelection(searchResult, m.ChannelID)
+		err := vi.downloadSelection(searchResult, m.ChannelID)
 		if err != nil {
 			log.Println(err)
 			return
@@ -547,9 +512,6 @@ func (vi *VoiceInstance) prepSearchSelectionPlay(searchResult *youtube.SearchRes
 		vi.downloadSelection(searchResult, m.ChannelID)
 	}
 
-	if !vi.channelVoiceJoin(guild, s, m) {
-		return
-	}
 	vi.playQueueFunc(m.ChannelID)
 }
 
@@ -736,7 +698,7 @@ func (vi *VoiceInstance) processDownloadQueue(channelID string) {
 
 //processDownloadQueueByVideoID handles download queue created by prepYoutubePlaylist function.
 //This function does the same job with processDownloadQueue(designed for handling query like items
-//video id doesn't know). This function handles items that we have video id.
+//video id doesn't know). This function handles items that have a video id.
 func (vi *VoiceInstance) processDownloadQueueByVideoID(channelID string) {
 	if vi.downloadQueue.Empty() {
 		return
@@ -761,9 +723,15 @@ func (vi *VoiceInstance) processDownloadQueueByVideoID(channelID string) {
 		return
 	}
 
+	//get thumbnail image from coverUrl
+	coverPath, err := util.GetCoverImage(songInstance.coverUrl)
+	if err != nil {
+		log.Println(err)
+	}
+
 	songInstance.songPath = videoPath
-	songInstance.coverUrl = DefaultCoverUrl
 	songInstance.duration = searchResult.Duration
+	songInstance.coverPath = coverPath
 
 	vi.playQueue.Put(songInstance)
 	return
@@ -824,9 +792,14 @@ func (vi *VoiceInstance) downloadByVideoID(songInstance *SongInstance) error {
 		return fmt.Errorf("Error while download video by ID: %v", err)
 	}
 
+	//get thumbnail image from coverUrl
+	coverPath, err := util.GetCoverImage(songInstance.coverUrl)
+	if err != nil {
+		log.Println(err)
+	}
+
 	songInstance.songPath = videoPath
-	songInstance.coverUrl = DefaultCoverUrl
-	songInstance.coverPath = DefaultCoverPath
+	songInstance.coverPath = coverPath
 	songInstance.duration = searchResult.Duration
 
 	vi.playQueue.Put(songInstance)
