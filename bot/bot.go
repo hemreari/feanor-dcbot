@@ -148,29 +148,26 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	//and plays the first result.
 	if strings.HasPrefix(m.Content, "!play") {
 		query := strings.Trim(m.Content, "!play ")
-		if query == "" {
+		if strings.Compare(query, "") == 0 {
 			return
 		}
 
-		if util.ValidateYoutubeUrl(query) {
-			vi.prepYoutubeUrl(query, s, m)
+		if util.IsSpotifyUrl(query) {
+			vi.prepSpotifyPlaylist(query, s, m)
 		}
+
+		if util.IsYoutubeUrl(query) {
+			vi.prepYoutubePlaylist(query, s, m)
+		}
+
+		/*
+			if util.ValidateYoutubeUrl(query) {
+				vi.prepYoutubeUrl(query, s, m)
+			}
+		*/
+
 		vi.prepQuery(query, s, m)
 		//vi.prepPlay(query, s, m)
-	}
-
-	if strings.HasPrefix(m.Content, "!list") {
-		link := strings.Trim(m.Content, "!list ")
-
-		//handle spotify playlist
-		if strings.Contains(link, "spotify") {
-			vi.prepSpotifyPlaylist(link, s, m)
-		}
-
-		//handle youtube playlist
-		if strings.Contains(link, "youtube") {
-			vi.prepYoutubePlaylist(link, s, m)
-		}
 	}
 
 	//search commands searchs query on yt and if it's
@@ -318,25 +315,32 @@ func (vi *VoiceInstance) searchOnYoutube(query string, s *discordgo.Session, m *
 	})
 }
 
-//prepSpotifyPlaylist gets tracks information from the given Spotify playlist URL
+//prepSpotifyPlaylist gets tracks information from the given Spotify URL
 //and parses them as youtube queries to add to the download queue.
 //finally starts the play process.
-func (vi *VoiceInstance) prepSpotifyPlaylist(link string, s *discordgo.Session, m *discordgo.MessageCreate) {
+func (vi *VoiceInstance) prepSpotifyPlaylist(url string, s *discordgo.Session, m *discordgo.MessageCreate) {
 	if !vi.validateMessageAndJoinVoiceChannel(s, m) {
 		return
 	}
 
-	id := util.GetSpotifyID(link)
+	id := util.GetSpotifyID(url)
 	if strings.Compare(id, "") == 0 {
-		log.Printf("Given URL \"%s\" is not an accepted spotify URL.\n", link)
+		log.Printf("Given URL \"%s\" is not an accepted spotify URL.\n", url)
 		vi.sendMessageToChannel(m.ChannelID, "Unexpected thing happend when playing the link. Try Again.")
+		return
+	}
+
+	urlType := util.GetSpotifyUrlType(url)
+	if urlType == util.SPOTIFYUNKNOWNURL {
+		log.Printf("Error. Coulnd't find type of Spotify URL.\n", url)
+		vi.sendMessageToChannel(m.ChannelID, "Please, Check Your URL and Try Again.")
 		return
 	}
 
 	//initialize spotify api.
 	spotifyAPI := initSpotifyAPI()
 
-	playlistList, err := spotifyAPI.GetSpotifyPlaylist(id)
+	playlistList, err := spotifyAPI.GetSpotifyPlaylist(id, urlType)
 	if err != nil {
 		log.Printf("Error while getting Spotify playlist tracks: %v", err)
 		vi.sendMessageToChannel(m.ChannelID, "Unexpected thing is happened. Please, Try again.")
@@ -369,6 +373,7 @@ func (vi *VoiceInstance) prepSpotifyPlaylist(link string, s *discordgo.Session, 
 
 	//start the play process.
 	vi.playQueueFunc(m.ChannelID)
+	return
 }
 
 func (vi *VoiceInstance) prepYoutubePlaylist(link string, s *discordgo.Session, m *discordgo.MessageCreate) {

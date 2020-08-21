@@ -13,20 +13,40 @@ import (
 	"time"
 )
 
+const (
+	//Spotify url types
+	SPOTIFYPLAYLISTURL = 1
+	SPOTIFYALBUMURL    = 2
+	SPOTIFYTRACKURL    = 3
+	SPOTIFYUNKNOWNURL  = -1
+)
+
 var (
 	letterRunes = []rune("abcdefghijklmnopqrstuvwxyz0123456789")
-	ytUrlRegex  = `(?m)^(http(s)??\:\/\/)?(www\.)?((youtube\.com\/watch\?v=)|(youtu.be\/))([a-zA-Z0-9\-_])+`
 
-	//var ytPlaylistUrlRegex = `/^.*(youtu.be\/|list=)([^#\&\?]*).*/`
+	ytUrlRegex = `(?m)^(http(s)??\:\/\/)?(www\.)?((youtube\.com\/watch\?v=)|(youtu.be\/))([a-zA-Z0-9\-_])+`
+
+	//var ytPlaylistUrlRegex = `/^.*(youtu.be\/|list=)([^#\&\?]*).
 	ytPlaylistUrlRegex = `^.*(youtube.com\/playlist\?list=)([^#\&\?]*)`
 
 	//var ytPlaylistUrlRegex = `^https?:\/\/(www.youtube.com|youtube.com)\/playlist(.*)$`
 	durationRegex = `P(?P<years>\d+Y)?(?P<months>\d+M)?(?P<days>\d+D)?T?(?P<hours>\d+H)?(?P<minutes>\d+M)?(?P<seconds>\d+S)?`
 
 	//http spotify urls regex for track, album, playlist ID's (matching group number is 3)
-	spotifyHttpUrlRegex = `(?m)^(https:\/\/open.spotify.com\/(playlist\/|album\/|track\/)([a-zA-Z0-9]+))(.*)$`
+	spotifyHttpUrlRegex      = `(?m)^(https:\/\/open.spotify.com\/(playlist\/|album\/|track\/)([a-zA-Z0-9]+))(.*)$`
+	spotifyHttpPlaylistRegex = `^(https:\/\/open.spotify.com\/playlist\/[[a-zA-Z0-9]{22}\?.*)$`
+	spotifyHttpAlbumRegex    = `^(https:\/\/open.spotify.com\/album\/[[a-zA-Z0-9]{22}\?.*)$`
+	spotifyHttpTrackRegex    = `^(https:\/\/open.spotify.com\/track\/[[a-zA-Z0-9]{22}\?.*)$`
 
 	spotifyIDRegex = `[a-zA-Z0-9]{22}`
+
+	//youtube url regex
+	ytPlaylistUrlRegex = `^(https?:\/\/www.youtube.com\/watch\?v=[a-zA-Z0-9]{11}\&list=[a-zA-Z0-9_-]{34}.*)$`
+
+	ytTrackUrlRegex = `^(https?:\/\/www.youtube.com\/watch\?v=[a-zA-Z0-9_-]{11})$`
+
+	ytPlaylistIDRegex = `[a-zA-Z0-9_-]{34}`
+	ytTrackIDRegex    = `[a-zA-Z0-9_-]{11}`
 )
 
 func init() {
@@ -82,15 +102,45 @@ func DeleteSoundAndCoverFile(soundFilePath, coverFilePath string) {
 	}
 }
 
+//IsSpotifyUrl checks given URL is a valid Spotify URL or not.
+//If given URL is valid then returns true, otherwise false.
+func IsSpotifyUrl(url string) bool {
+	re := regexp.MustCompile(spotifyHttpUrlRegex)
+	if re.MatchString(url) {
+		return true
+	}
+	return false
+}
+
+/*
+//IsYoutubeUrl check given is a valid Youtube URL or not.
+//If given URL is valid then returns true, otherwise false.
+func IsYoutubeUrl(url string) bool {
+	re := regexp.MustCompile()
+}
+*/
+
 //GetSpotifyID returns ID of playlist, album or track from the given URL.
 //("https://open.spotify.com/track/<ID>?si=NoAgqqb6Sp2vV-1IBzzM-g")
 func GetSpotifyID(url string) string {
-	re := regexp.MustCompile(spotifyHttpUrlRegex)
-	if re.MatchString(url) {
+	if IsSpotifyUrl(url) {
 		reId := regexp.MustCompile(spotifyIDRegex)
 		return reId.FindString(url)
 	}
 	return ""
+}
+
+//GetSpotifyUrlType returns the type of the given url in integer.
+func GetSpotifyUrlType(url string) int {
+	if strings.Contains(url, "playlist") {
+		return SPOTIFYPLAYLISTURL
+	} else if strings.Contains(url, "album") {
+		return SPOTIFYALBUMURL
+	} else if strings.Contains(url, "track") {
+		return SPOTIFYTRACKURL
+	} else {
+		return SPOTIFYUNKNOWNURL
+	}
 }
 
 //GetSpotifyPlaylistID returns playlist ID
