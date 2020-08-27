@@ -18,35 +18,33 @@ const (
 	SPOTIFYPLAYLISTURL = 1
 	SPOTIFYALBUMURL    = 2
 	SPOTIFYTRACKURL    = 3
-	SPOTIFYUNKNOWNURL  = -1
+
+	UNKNOWNURL = -1
+
+	YOUTUBEPLAYLISTURL = 11
+	YOUTUBETRACKURL    = 13
 )
 
 var (
 	letterRunes = []rune("abcdefghijklmnopqrstuvwxyz0123456789")
 
-	ytUrlRegex = `(?m)^(http(s)??\:\/\/)?(www\.)?((youtube\.com\/watch\?v=)|(youtu.be\/))([a-zA-Z0-9\-_])+`
-
 	//var ytPlaylistUrlRegex = `/^.*(youtu.be\/|list=)([^#\&\?]*).
-	ytPlaylistUrlRegex = `^.*(youtube.com\/playlist\?list=)([^#\&\?]*)`
+	//ytPlaylistUrlRegex = `^.*(youtube.com\/playlist\?list=)([^#\&\?]*)`
 
 	//var ytPlaylistUrlRegex = `^https?:\/\/(www.youtube.com|youtube.com)\/playlist(.*)$`
 	durationRegex = `P(?P<years>\d+Y)?(?P<months>\d+M)?(?P<days>\d+D)?T?(?P<hours>\d+H)?(?P<minutes>\d+M)?(?P<seconds>\d+S)?`
 
-	//http spotify urls regex for track, album, playlist ID's (matching group number is 3)
-	spotifyHttpUrlRegex      = `(?m)^(https:\/\/open.spotify.com\/(playlist\/|album\/|track\/)([a-zA-Z0-9]+))(.*)$`
+	//http spotify urls regex for track, album, playlist ID's.
+	spotifyHttpUrlRegex      = `^(?:https?:\/\/open.spotify.com\/(?:playlist\/|album\/|track\/)([a-zA-Z0-9]+))(?:.*)`
 	spotifyHttpPlaylistRegex = `^(https:\/\/open.spotify.com\/playlist\/[[a-zA-Z0-9]{22}\?.*)$`
 	spotifyHttpAlbumRegex    = `^(https:\/\/open.spotify.com\/album\/[[a-zA-Z0-9]{22}\?.*)$`
 	spotifyHttpTrackRegex    = `^(https:\/\/open.spotify.com\/track\/[[a-zA-Z0-9]{22}\?.*)$`
 
-	spotifyIDRegex = `[a-zA-Z0-9]{22}`
-
 	//youtube url regex
-	ytPlaylistUrlRegex = `^(https?:\/\/www.youtube.com\/watch\?v=[a-zA-Z0-9]{11}\&list=[a-zA-Z0-9_-]{34}.*)$`
+	ytUrlRegex = `^(?:https?\:\/\/)?(?:www\.)?(?:(?:youtube\.com\/watch\?v=)|(?:youtu.be\/))([a-zA-Z0-9\-_]{11})+.*$|^(?:https:\/\/www.youtube.com\/playlist\?list=)([a-zA-Z0-9\-_]{34}).*$`
 
-	ytTrackUrlRegex = `^(https?:\/\/www.youtube.com\/watch\?v=[a-zA-Z0-9_-]{11})$`
-
-	ytPlaylistIDRegex = `[a-zA-Z0-9_-]{34}`
-	ytTrackIDRegex    = `[a-zA-Z0-9_-]{11}`
+	ytPlaylistUrlRegex = `^(?:https:\/\/www.youtube.com\/playlist\?list=)([a-zA-Z0-9\-_]{34}).*$`
+	ytTrackUrlRegex    = `^(?:https?\:\/\/)?(?:www\.)?(?:(?:youtube\.com\/watch\?v=)|(?:youtu.be\/))([a-zA-Z0-9\-_]{11})+.*$`
 )
 
 func init() {
@@ -112,22 +110,14 @@ func IsSpotifyUrl(url string) bool {
 	return false
 }
 
-/*
-//IsYoutubeUrl check given is a valid Youtube URL or not.
-//If given URL is valid then returns true, otherwise false.
-func IsYoutubeUrl(url string) bool {
-	re := regexp.MustCompile()
-}
-*/
-
 //GetSpotifyID returns ID of playlist, album or track from the given URL.
-//("https://open.spotify.com/track/<ID>?si=NoAgqqb6Sp2vV-1IBzzM-g")
 func GetSpotifyID(url string) string {
-	if IsSpotifyUrl(url) {
-		reId := regexp.MustCompile(spotifyIDRegex)
-		return reId.FindString(url)
+	re := regexp.MustCompile(spotifyHttpUrlRegex)
+	matches := re.FindStringSubmatch(url)
+	if matches == nil {
+		return ""
 	}
-	return ""
+	return matches[1]
 }
 
 //GetSpotifyUrlType returns the type of the given url in integer.
@@ -139,7 +129,50 @@ func GetSpotifyUrlType(url string) int {
 	} else if strings.Contains(url, "track") {
 		return SPOTIFYTRACKURL
 	} else {
-		return SPOTIFYUNKNOWNURL
+		return UNKNOWNURL
+	}
+}
+
+//IsYoutubeUrl check given is a valid Youtube URL or not.
+//If given URL is valid then returns true, otherwise false.
+func IsYoutubeUrl(url string) bool {
+	re := regexp.MustCompile(ytUrlRegex)
+	if re.MatchString(url) {
+		return true
+	}
+	return false
+}
+
+//GetYoutubeID returns ID of playlist or track from the given URL.
+func GetYoutubeID(url string) string {
+	var re *regexp.Regexp
+
+	if strings.Contains(url, "playlist") {
+		re = regexp.MustCompile(ytPlaylistUrlRegex)
+	} else {
+		re = regexp.MustCompile(ytTrackUrlRegex)
+	}
+	matches := re.FindStringSubmatch(url)
+	if matches == nil {
+		return ""
+	}
+	return matches[1]
+}
+
+//GetYoutubeUrlType returns the type of the given url in integer.
+func GetYoutubeUrlType(url string) int {
+	//Youtube has lots of different URL formats. So this makes
+	//hard to detect URL formats. If a given Youtbe URL is not a
+	//playlist URL then YOUTUBETRACKURL code will be returned.
+
+	//There is also Mixes that we think of as playlist.
+	//I haven't decide whether Mixes treated as playlist
+	//or not(even bot don't accept Mix URL). So until Mix
+	//and playlist concept is decided, Mix URLs will not be accepted.
+	if strings.Contains(url, "playlist") {
+		return YOUTUBEPLAYLISTURL
+	} else {
+		return YOUTUBETRACKURL
 	}
 }
 
