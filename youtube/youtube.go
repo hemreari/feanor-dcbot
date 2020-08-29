@@ -27,6 +27,7 @@ type SearchResult struct {
 	VideoTitle string
 	Duration   string
 	VideoPath  string
+	CoverUrl   string
 	CoverPath  string
 }
 
@@ -34,6 +35,24 @@ func NewYoutubeAPI(developerKey string) *YoutubeAPI {
 	return &YoutubeAPI{
 		DeveloperKey: developerKey,
 	}
+}
+
+func (y *YoutubeAPI) GetYoutubePlaylist(id string, urlType int) ([]SearchResult, error) {
+	switch urlType {
+	case util.YOUTUBEPLAYLISTURL:
+		playlist, err := y.HandleYoutubePlaylist(id)
+		if err != nil {
+			return nil, err
+		}
+		return playlist, err
+	case util.YOUTUBETRACKURL:
+		playlist, err := y.HandleYoutubeTrack(id)
+		if err != nil {
+			return nil, err
+		}
+		return playlist, err
+	}
+	return nil, nil
 }
 
 //GetVideoID searches given query on the youtube and returns
@@ -70,7 +89,7 @@ func (y *YoutubeAPI) GetVideoID(query string) *SearchResult {
 				VideoID:    item.Id.VideoId,
 				VideoTitle: newTitle,
 				Duration:   y.GetDurationByID(item.Id.VideoId),
-				CoverPath:  "https://github.com/golang/go/blob/master/doc/gopher/fiveyears.jpg",
+				CoverUrl:   "https://github.com/golang/go/blob/master/doc/gopher/fiveyears.jpg",
 			}
 		default:
 			return &SearchResult{}
@@ -110,7 +129,7 @@ func (y *YoutubeAPI) GetVideoResults(query string) *[]SearchResult {
 			searchResult.VideoID = item.Id.VideoId
 			searchResult.VideoTitle = item.Snippet.Title
 			searchResult.Duration = y.GetDurationByID(item.Id.VideoId)
-			searchResult.CoverPath = "https://github.com/golang/go/blob/master/doc/gopher/fiveyears.jpg"
+			searchResult.CoverUrl = "https://github.com/golang/go/blob/master/doc/gopher/fiveyears.jpg"
 			results = append(results, searchResult)
 		default:
 			results = append(results, searchResult)
@@ -143,10 +162,10 @@ func (y *YoutubeAPI) GetDurationByID(id string) string {
 	return ""
 }
 
-func (y *YoutubeAPI) DownloadVideo(searchResult *SearchResult) (string, error) {
-	videoPath := util.FormatVideoTitle(searchResult.VideoTitle) + ".m4a"
+func (y *YoutubeAPI) DownloadVideo(videoTitle, videoID string) (string, error) {
+	videoPath := util.FormatVideoTitle(videoTitle) + ".m4a"
 
-	if searchResult.VideoID == "" {
+	if videoID == "" {
 		return "", fmt.Errorf("Coulnd't get a video ID.")
 	}
 
@@ -158,7 +177,7 @@ func (y *YoutubeAPI) DownloadVideo(searchResult *SearchResult) (string, error) {
 		"'bestaudio[ext=m4a]",
 		"-o",
 		videoPath,
-		searchResult.VideoID,
+		videoID,
 	}
 
 	cmd := exec.Command("youtube-dl", ytdlArgs...)
@@ -173,11 +192,10 @@ func (y *YoutubeAPI) DownloadVideo(searchResult *SearchResult) (string, error) {
 }
 
 //DownloadVideo downloads video and returns video path.
-func DownloadVideo(searchResult *SearchResult) (string, error) {
-	videoTitle := searchResult.VideoTitle
+func DownloadVideo(videoTitle, videoID string) (string, error) {
 	videoPath := videoTitle + ".m4a"
 
-	if searchResult.VideoID == "" {
+	if videoID == "" {
 		return "", fmt.Errorf("Couldn't find the video ID.")
 	}
 
@@ -189,7 +207,7 @@ func DownloadVideo(searchResult *SearchResult) (string, error) {
 		"'bestaudio[ext=m4a]",
 		"-o",
 		videoPath,
-		searchResult.VideoID,
+		videoID,
 	}
 
 	cmd := exec.Command("youtube-dl", ytdlArgs...)
@@ -208,7 +226,7 @@ func DownloadVideo(searchResult *SearchResult) (string, error) {
 func (y *YoutubeAPI) SearchDownload(query string) (*SearchResult, error) {
 	searchRes := y.GetVideoID(query)
 
-	path, err := DownloadVideo(searchRes)
+	path, err := DownloadVideo(searchRes.VideoTitle, searchRes.VideoID)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +235,7 @@ func (y *YoutubeAPI) SearchDownload(query string) (*SearchResult, error) {
 }
 
 //GetInfoByID returns video information about the given video id.
-func (y *YoutubeAPI) GetInfoByID(id string) *SearchResult {
+func (y *YoutubeAPI) GetInfoByID(id string) (*SearchResult, error) {
 	devKey := y.DeveloperKey
 
 	client := &http.Client{
@@ -226,34 +244,64 @@ func (y *YoutubeAPI) GetInfoByID(id string) *SearchResult {
 
 	service, err := youtube.New(client)
 	if err != nil {
-		log.Fatalf("Error while creating new YouTube client: %v", err)
+		return nil, fmt.Errorf("Error while creating new YouTube client: %v", err)
 	}
 
 	call := service.Videos.List("id,contentDetails,snippet").Id(id)
 	response, err := call.Do()
 	if err != nil {
-		log.Println(err)
+		return nil, fmt.Errorf("Error while making call: %v", err)
 	}
 
 	for _, item := range response.Items {
 		switch item.Kind {
 		case "youtube#video":
-			newTitle := util.FormatVideoTitle(item.Snippet.Title)
+			snippet := item.Snippet
+			newTitle := util.FormatVideoTitle(snippet.Title)
 			return &SearchResult{
 				VideoID:    item.Id,
 				VideoTitle: newTitle,
 				Duration:   util.ParseISO8601(item.ContentDetails.Duration),
-			}
+				CoverUrl:   snippet.Thumbnails.High.Url,
+			}, nil
 		default:
-			return &SearchResult{}
+			return &SearchResult{}, nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
-//GetYoutubePlaylistByID makes the api request to Youtube Data API to
+func (y *YoutubeAPI) HandleYoutubePlaylist(id string) ([]SearchResult, error) {
+	plTracks, err := y.getYoutubePlaylistById(id)
+	if err != nil {
+		return nil, err
+	}
+
+	playlist := []SearchResult{}
+
+	for i, playlistItem := range plTracks.Items {
+		if i > 20 {
+			break
+		}
+
+		videoID := playlistItem.Snippet.ResourceId.VideoId
+		thumbnailUrl := playlistItem.Snippet.Thumbnails.High.Url
+		videoTitle := playlistItem.Snippet.Title
+
+		track := SearchResult{
+			VideoID:    videoID,
+			VideoTitle: videoTitle,
+			CoverUrl:   thumbnailUrl,
+			Duration:   y.GetDurationByID(videoID),
+		}
+		playlist = append(playlist, track)
+	}
+	return playlist, nil
+}
+
+//getYoutubePlaylistById makes the api request to Youtube Data API to
 //get information about the given playlist ID.
-func (y *YoutubeAPI) GetYoutubePlaylistByID(playlistID string) (*youtube.PlaylistItemListResponse, error) {
+func (y *YoutubeAPI) getYoutubePlaylistById(id string) (*youtube.PlaylistItemListResponse, error) {
 	devKey := y.DeveloperKey
 
 	client := &http.Client{
@@ -265,7 +313,7 @@ func (y *YoutubeAPI) GetYoutubePlaylistByID(playlistID string) (*youtube.Playlis
 		return nil, fmt.Errorf("Error while creating new Youtube client: %v", err)
 	}
 
-	call := service.PlaylistItems.List("snippet").PlaylistId(playlistID).MaxResults(DefaultPlaylistItemCount)
+	call := service.PlaylistItems.List("snippet").PlaylistId(id).MaxResults(DefaultPlaylistItemCount)
 	response, err := call.Do()
 	if err != nil {
 		log.Println(err)
@@ -273,4 +321,16 @@ func (y *YoutubeAPI) GetYoutubePlaylistByID(playlistID string) (*youtube.Playlis
 	}
 
 	return response, nil
+}
+
+func (y *YoutubeAPI) HandleYoutubeTrack(id string) ([]SearchResult, error) {
+	trackInfo, err := y.GetInfoByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	playlist := []SearchResult{}
+	playlist = append(playlist, *trackInfo)
+
+	return playlist, nil
 }

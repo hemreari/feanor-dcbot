@@ -160,12 +160,6 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			vi.prepYoutubePlaylist(query, s, m)
 		}
 
-		/*
-			if util.ValidateYoutubeUrl(query) {
-				vi.prepYoutubeUrl(query, s, m)
-			}
-		*/
-
 		vi.prepQuery(query, s, m)
 		//vi.prepPlay(query, s, m)
 	}
@@ -331,7 +325,7 @@ func (vi *VoiceInstance) prepSpotifyPlaylist(url string, s *discordgo.Session, m
 	}
 
 	urlType := util.GetSpotifyUrlType(url)
-	if urlType == util.SPOTIFYUNKNOWNURL {
+	if urlType == util.UNKNOWNURL {
 		log.Printf("Error. Coulnd't find type of Spotify URL.\n", url)
 		vi.sendMessageToChannel(m.ChannelID, "Please, Check Your URL and Try Again.")
 		return
@@ -347,7 +341,7 @@ func (vi *VoiceInstance) prepSpotifyPlaylist(url string, s *discordgo.Session, m
 		return
 	}
 
-	//when !list command is received stop the play process
+	//when !play command is received stop the play process
 	//if bot has on going play job.
 	if vi.isPlaying == true {
 		vi.stopSong(m)
@@ -376,26 +370,27 @@ func (vi *VoiceInstance) prepSpotifyPlaylist(url string, s *discordgo.Session, m
 	return
 }
 
-func (vi *VoiceInstance) prepYoutubePlaylist(link string, s *discordgo.Session, m *discordgo.MessageCreate) {
+func (vi *VoiceInstance) prepYoutubePlaylist(url string, s *discordgo.Session, m *discordgo.MessageCreate) {
 	if !vi.validateMessageAndJoinVoiceChannel(s, m) {
 		return
 	}
 
-	//when !list command is received stop the play process
+	//when !play command is received stop the play process
 	//if bot has on going play job.
 	if vi.isPlaying == true {
 		vi.stopSong(m)
 	}
 
-	playlistID := util.GetYoutubePlaylistID(link)
-	//check url if it is correct or not.
-	if playlistID == "" {
-		log.Printf("Given URL \"%s\" is not a youtube playlist url.\n", link)
-		vi.sendMessageToChannel(m.ChannelID, "Given URL is not a Youtube playlist.")
+	id := util.GetYoutubeID(url)
+	if strings.Compare(id, "") == 0 {
+		log.Printf("Given URL \"%s\" is not a youtube playlist url.\n", url)
+		vi.sendMessageToChannel(m.ChannelID, "Given URL is not a valid URL.")
 		return
 	}
 
-	response, err := yt.GetYoutubePlaylistByID(playlistID)
+	urlType := util.GetYoutubeUrlType(url)
+
+	playlistList, err := yt.GetYoutubePlaylist(id, urlType)
 	if err != nil {
 		log.Println(err)
 		vi.sendMessageToChannel(m.ChannelID, "Unexpected thing when playing playlist. Try Again.")
@@ -403,25 +398,25 @@ func (vi *VoiceInstance) prepYoutubePlaylist(link string, s *discordgo.Session, 
 	}
 
 	//add tracks to download queue.
-	for _, playlistItem := range response.Items {
-		videoID := playlistItem.Snippet.ResourceId.VideoId
-		thumbnailUrl := playlistItem.Snippet.Thumbnails.High.Url
-		videoTitle := playlistItem.Snippet.Title
-
+	for _, item := range playlistList {
 		songInstance := SongInstance{
-			videoID:  videoID,
-			title:    videoTitle,
-			coverUrl: thumbnailUrl,
+			title:    item.VideoTitle,
+			duration: item.Duration,
+			coverUrl: item.CoverUrl,
+			videoID:  item.VideoID,
 		}
 
+		//first playlist track is not putting in to the download queue.
+		//it's going to be downloaded directly.
 		if vi.playQueue.Empty() {
-			_ = vi.downloadByVideoID(&songInstance)
+			_ = vi.downloadID(&songInstance, m.ChannelID)
 			continue
 		}
+
 		vi.downloadQueue.Put(&songInstance)
 	}
 
-	vi.playQueueFuncByID(m.ChannelID)
+	vi.playQueueFunc(m.ChannelID)
 }
 
 //prepQuery prepares simple queries like "michael jackson billie jean" to play.
@@ -444,14 +439,6 @@ func (vi *VoiceInstance) prepQuery(query string, s *discordgo.Session, m *discor
 	}
 
 	vi.playQueueFunc(m.ChannelID)
-	return
-}
-
-//prepYtUrl prepares given yt urls like "https://www.youtube.com/watch?v=6MyAOqrPACY" to play.
-func (vi *VoiceInstance) prepYoutubeUrl(url string, s *discordgo.Session, m *discordgo.MessageCreate) {
-	videoID := util.GetYtVideoID(url)
-
-	yt.GetInfoByID(videoID)
 	return
 }
 
@@ -597,80 +584,6 @@ func (vi *VoiceInstance) playQueueFunc(channelID string) {
 	}
 }
 
-//handles youtube playlist play process.
-//could be done in playQueueFunc()
-func (vi *VoiceInstance) playQueueFuncByID(channelID string) {
-	err := vi.dgv.Speaking(true)
-	if err != nil {
-		log.Println("Couldn't set speaking", err)
-	}
-
-	defer func() {
-		vi.disconnectBot()
-	}()
-
-	chanPlayStat := make(chan int)
-	for {
-		if !vi.downloadQueue.Empty() {
-			maxNumberofGoroutines := 2
-
-			conGoroutines := make(chan struct{}, maxNumberofGoroutines)
-
-			for i := 0; i < maxNumberofGoroutines; i++ {
-				conGoroutines <- struct{}{}
-			}
-
-			doneLimitChan := make(chan bool)
-			waitForAllJobs := make(chan bool)
-
-			go func() {
-				for i := 0; i < int(vi.downloadQueue.Len()); i++ {
-					<-doneLimitChan
-					conGoroutines <- struct{}{}
-				}
-				waitForAllJobs <- true
-			}()
-
-			for i := 1; i <= int(vi.downloadQueue.Len()); i++ {
-				<-conGoroutines
-				go func(id int) {
-					vi.processDownloadQueueByVideoID(channelID)
-					doneLimitChan <- true
-				}(i)
-			}
-
-			<-waitForAllJobs
-		}
-
-		//isPlaying is false means that bot is not  playing any song
-		//at the moment and play queue is empty so we can call processPlayQueue
-		//function to play a song from the play queue.
-		//I added isPlaying condition to prevent calling other processPlayQueue
-		//goroutinues that causes playing multiple song simultaneously.
-		if vi.isPlaying == false && !vi.playQueue.Empty() {
-			vi.isPlaying = true
-			go vi.processPlayQueue(chanPlayStat, channelID)
-		}
-		//if download queue is empty, there is no other jobs to run
-		//we can just wait to end the play job.
-		if vi.downloadQueue.Empty() {
-			playStat := <-chanPlayStat
-			log.Println("playStat:", playStat)
-			if playStat == 0 {
-				vi.sendMessageToChannel(channelID, "See you later.")
-				return
-			}
-		} else {
-			select {
-			case playStat := <-chanPlayStat:
-				log.Println("chanPlayStat: ", playStat)
-			default:
-				continue
-			}
-		}
-	}
-}
-
 //processDownloadQueue had channel to keep track of the download status
 //of songs but I think this not necessary anymore so I removed channel.
 //With the latest changes processDownloadQueue and downloadQuery functions
@@ -694,56 +607,26 @@ func (vi *VoiceInstance) processDownloadQueue(channelID string) {
 		return
 	}
 
-	err = vi.downloadQuery(songInstance, channelID)
-	if err != nil {
-		log.Println(err)
-		return
+	//if songInstance struct's videoID field is not empty,
+	//then it is Youtube related song(playlist or track),
+	//so no need get video ID again.
+	if strings.Compare(songInstance.videoID, "") != 0 {
+		err = vi.downloadID(songInstance, channelID)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+	} else {
+		err = vi.downloadQuery(songInstance, channelID)
+		if err != nil {
+			log.Println(err)
+			return
+		}
 	}
-}
-
-//processDownloadQueueByVideoID handles download queue created by prepYoutubePlaylist function.
-//This function does the same job with processDownloadQueue(designed for handling query like items
-//video id doesn't know). This function handles items that have a video id.
-func (vi *VoiceInstance) processDownloadQueueByVideoID(channelID string) {
-	if vi.downloadQueue.Empty() {
-		return
-	}
-
-	nextItem, err := vi.downloadQueue.Get(1)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	songInstance := getSongInstanceFromInterface(nextItem[0])
-	if songInstance == nil {
-		log.Println("Error while converting interface {} to SongInstance{}.")
-		return
-	}
-
-	searchResult := yt.GetInfoByID(songInstance.videoID)
-	videoPath, err := youtube.DownloadVideo(searchResult)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	//get thumbnail image from coverUrl
-	coverPath, err := util.GetCoverImage(songInstance.coverUrl)
-	if err != nil {
-		log.Println(err)
-	}
-
-	songInstance.songPath = videoPath
-	songInstance.duration = searchResult.Duration
-	songInstance.coverPath = coverPath
-
-	vi.playQueue.Put(songInstance)
-	return
 }
 
 func (vi *VoiceInstance) downloadSelection(searchResult *youtube.SearchResult, channelID string) error {
-	songPath, err := yt.DownloadVideo(searchResult)
+	songPath, err := yt.DownloadVideo(searchResult.VideoTitle, searchResult.VideoID)
 	if err != nil {
 		vi.sendMessageToChannel(channelID, "Unexpected thing happend. Try again.")
 		return err
@@ -763,7 +646,7 @@ func (vi *VoiceInstance) downloadSelection(searchResult *youtube.SearchResult, c
 
 //vide supra processDownloadQueue function comment.
 func (vi *VoiceInstance) downloadQuery(songInstance *SongInstance, channelID string) error {
-	query := songInstance.artist + songInstance.title
+	query := songInstance.artist + " " + songInstance.title
 	searchResult, err := yt.SearchDownload(query)
 	if err != nil {
 		vi.sendMessageToChannel(channelID, "Query is insufficient to find a result. Try again.")
@@ -787,25 +670,22 @@ func (vi *VoiceInstance) downloadQuery(songInstance *SongInstance, channelID str
 	return nil
 }
 
-//downloadByVideoID downloads a video which is id is known.
-//when download process is finished, adds downloaded song to
-//the play queue.
-func (vi *VoiceInstance) downloadByVideoID(songInstance *SongInstance) error {
-	searchResult := yt.GetInfoByID(songInstance.videoID)
-	videoPath, err := youtube.DownloadVideo(searchResult)
+//downloadID calls the function that download video in the given songIntance argument,
+//then add download songInstance to playQueue.
+func (vi *VoiceInstance) downloadID(songInstance *SongInstance, channelID string) error {
+	videoPath, err := youtube.DownloadVideo(songInstance.title, songInstance.videoID)
 	if err != nil {
-		return fmt.Errorf("Error while download video by ID: %v", err)
+		return err
 	}
 
 	//get thumbnail image from coverUrl
 	coverPath, err := util.GetCoverImage(songInstance.coverUrl)
 	if err != nil {
-		log.Println(err)
+		return err
 	}
 
 	songInstance.songPath = videoPath
 	songInstance.coverPath = coverPath
-	songInstance.duration = searchResult.Duration
 
 	vi.playQueue.Put(songInstance)
 	return nil
