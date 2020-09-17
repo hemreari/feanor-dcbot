@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -23,6 +24,10 @@ const (
 
 	YOUTUBEPLAYLISTURL = 11
 	YOUTUBETRACKURL    = 13
+
+	//PATH CONSTS
+	BASECOVERPATH = "cover"
+	BASESONGPATH  = "song"
 )
 
 var (
@@ -41,7 +46,7 @@ var (
 	spotifyHttpTrackRegex    = `^(https:\/\/open.spotify.com\/track\/[[a-zA-Z0-9]{22}\?.*)$`
 
 	//youtube url regex
-	ytUrlRegex = `^(?:https?\:\/\/)?(?:www\.)?(?:(?:youtube\.com\/watch\?v=)|(?:youtu.be\/))([a-zA-Z0-9\-_]{11})+.*$|^(?:https:\/\/www.youtube.com\/playlist\?list=)([a-zA-Z0-9\-_]{34}).*$`
+	ytUrlRegex = `^(?:https?\:\/\/)?(?:www\.)?(?:(?:youtube\.com\/watch\?v=)|(?:youtu.be\/))([a-zA-Z0-9\-_]{11})+.*$|^(?:https:\/\/www.youtube.com\/playlist\?list=)([a-zA-Z0-9\-_].*).*$`
 
 	ytPlaylistUrlRegex = `^(?:https:\/\/www.youtube.com\/playlist\?list=)([a-zA-Z0-9\-_]{34}).*$`
 	ytTrackUrlRegex    = `^(?:https?\:\/\/)?(?:www\.)?(?:(?:youtube\.com\/watch\?v=)|(?:youtu.be\/))([a-zA-Z0-9\-_]{11})+.*$`
@@ -59,11 +64,25 @@ func RandStringRunes(n int) string {
 	return string(b)
 }
 
+//FormatVideoTitle formats given string appropriate for file name.
 func FormatVideoTitle(videoTitle string) string {
-	newTitle := strings.Trim(videoTitle, " ")
-	newTitle = strings.ReplaceAll(newTitle, " ", "_")
+	newTitle := strings.TrimSpace(videoTitle)
+
+	stringReplacer := strings.NewReplacer("/", "_", "-", "_", ",", "_", " ", "", "'", "")
+
+	newTitle = stringReplacer.Replace(newTitle)
+	//videoFileFullPath := path.Join(BASESONGPATH, newTitle)
 
 	return newTitle
+}
+
+//GetVideoPath returns formatted version of the given video title
+//as full file video path.
+func GetVideoPath(videoTitle string) string {
+	formattedTitlePath := FormatVideoTitle(videoTitle) + ".m4a"
+
+	formattedTitleFullPath := path.Join(BASESONGPATH, formattedTitlePath)
+	return formattedTitleFullPath
 }
 
 //GetWorkingDirPath returns working path
@@ -227,7 +246,9 @@ func GetCoverImage(coverUrl string) (string, error) {
 
 	imgFileName := RandStringRunes(15) + ".jpg"
 
-	imgFile, err := os.Create(imgFileName)
+	imgFileFullPath := path.Join(BASECOVERPATH, imgFileName)
+
+	imgFile, err := os.Create(imgFileFullPath)
 	if err != nil {
 		return "", fmt.Errorf("Error while creating cover image file: %v", err)
 	}
@@ -237,7 +258,7 @@ func GetCoverImage(coverUrl string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("Error while getting cover image file: %v", err)
 	}
-	return imgFileName, nil
+	return imgFileFullPath, nil
 }
 
 //ValiadateYoutubeUrl validates whether given url is a youtube url or not.
@@ -249,13 +270,6 @@ func ValidateYoutubeUrl(url string) bool {
 	}
 	return r.MatchString(url)
 }
-
-/*
-//ValidateSpotifyTrackUrl validates whether given url is a Spotify track url or not.
-func ValidateSpotifyTrackUrl(url string) bool {
-
-}
-*/
 
 //ValidateYoutubePlaylistUrl validates whether given url is a youtube playlist url or not.
 func ValidateYoutubePlaylistUrl(url string) bool {
@@ -306,4 +320,34 @@ func parseInt64(value string) int64 {
 	}
 
 	return int64(parsed)
+}
+
+//CreateCoverFolder creates a folder called cover
+//if it's not already exists.
+func CreateCoverFolder() error {
+	_, err := os.Stat(BASECOVERPATH)
+	if !os.IsNotExist(err) {
+		return nil
+	} else {
+		mkdirErr := os.Mkdir(BASECOVERPATH, 0755)
+		if mkdirErr != nil {
+			return fmt.Errorf("Couldn't create cover folder: %v", err)
+		}
+		return nil
+	}
+}
+
+//CreateSongFolder creates a folder called song
+//if it's not already exists.
+func CreateSongFolder() error {
+	_, err := os.Stat(BASESONGPATH)
+	if !os.IsNotExist(err) {
+		return nil
+	} else {
+		mkdirErr := os.Mkdir(BASESONGPATH, 0755)
+		if mkdirErr != nil {
+			return fmt.Errorf("Couldn't create song folder: %v", err)
+		}
+		return nil
+	}
 }

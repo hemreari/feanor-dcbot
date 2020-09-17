@@ -103,6 +103,17 @@ func InitBot(botToken string, ytAPI *youtube.YoutubeAPI, config *config.Config) 
 		playHistoryList:     list.New(),
 	}
 
+	//create cover and song folder if they are not exist
+	err = util.CreateCoverFolder()
+	if err != nil {
+		return err
+	}
+
+	err = util.CreateSongFolder()
+	if err != nil {
+		return err
+	}
+
 	log.Println("Feanor is running. Press Ctrl-C to exit.")
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM, os.Interrupt, os.Kill)
@@ -154,14 +165,16 @@ func messageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 		if util.IsSpotifyUrl(query) {
 			vi.prepSpotifyPlaylist(query, s, m)
+			return
 		}
 
 		if util.IsYoutubeUrl(query) {
 			vi.prepYoutubePlaylist(query, s, m)
+			return
 		}
 
 		vi.prepQuery(query, s, m)
-		//vi.prepPlay(query, s, m)
+		return
 	}
 
 	//search commands searchs query on yt and if it's
@@ -218,7 +231,6 @@ func (vi *VoiceInstance) validateUserVoiceState(s *discordgo.Session, m *discord
 		if vs.UserID == m.Author.ID {
 			return true
 		}
-		return false
 	}
 	return false
 }
@@ -381,8 +393,8 @@ func (vi *VoiceInstance) prepYoutubePlaylist(url string, s *discordgo.Session, m
 		vi.stopSong(m)
 	}
 
-	id := util.GetYoutubeID(url)
-	if strings.Compare(id, "") == 0 {
+	playlistID := util.GetYoutubeID(url)
+	if strings.Compare(playlistID, "") == 0 {
 		log.Printf("Given URL \"%s\" is not a youtube playlist url.\n", url)
 		vi.sendMessageToChannel(m.ChannelID, "Given URL is not a valid URL.")
 		return
@@ -390,7 +402,7 @@ func (vi *VoiceInstance) prepYoutubePlaylist(url string, s *discordgo.Session, m
 
 	urlType := util.GetYoutubeUrlType(url)
 
-	playlistList, err := yt.GetYoutubePlaylist(id, urlType)
+	playlistList, err := yt.GetYoutubePlaylist(playlistID, urlType)
 	if err != nil {
 		log.Println(err)
 		vi.sendMessageToChannel(m.ChannelID, "Unexpected thing when playing playlist. Try Again.")
@@ -626,7 +638,7 @@ func (vi *VoiceInstance) processDownloadQueue(channelID string) {
 }
 
 func (vi *VoiceInstance) downloadSelection(searchResult *youtube.SearchResult, channelID string) error {
-	songPath, err := yt.DownloadVideo(searchResult.VideoTitle, searchResult.VideoID)
+	songPath, err := youtube.DownloadVideo(searchResult.VideoTitle, searchResult.VideoID)
 	if err != nil {
 		vi.sendMessageToChannel(channelID, "Unexpected thing happend. Try again.")
 		return err
@@ -673,7 +685,7 @@ func (vi *VoiceInstance) downloadQuery(songInstance *SongInstance, channelID str
 //downloadID calls the function that download video in the given songIntance argument,
 //then add download songInstance to playQueue.
 func (vi *VoiceInstance) downloadID(songInstance *SongInstance, channelID string) error {
-	videoPath, err := youtube.DownloadVideo(songInstance.title, songInstance.videoID)
+	songPath, err := youtube.DownloadVideo(songInstance.title, songInstance.videoID)
 	if err != nil {
 		return err
 	}
@@ -684,7 +696,7 @@ func (vi *VoiceInstance) downloadID(songInstance *SongInstance, channelID string
 		return err
 	}
 
-	songInstance.songPath = videoPath
+	songInstance.songPath = songPath
 	songInstance.coverPath = coverPath
 
 	vi.playQueue.Put(songInstance)

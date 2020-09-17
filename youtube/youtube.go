@@ -162,42 +162,25 @@ func (y *YoutubeAPI) GetDurationByID(id string) string {
 	return ""
 }
 
-func (y *YoutubeAPI) DownloadVideo(videoTitle, videoID string) (string, error) {
-	videoPath := util.FormatVideoTitle(videoTitle) + ".m4a"
-
+//DownloadVideo downloads video with ytdl, returns downloaded video file's path.
+func DownloadVideo(videoTitle, videoID string) (string, error) {
 	if videoID == "" {
 		return "", fmt.Errorf("Coulnd't get a video ID.")
 	}
 
-	log.Printf("Starting to download: %s\n", videoPath)
-
-	ytdlArgs := []string{
-		"--force-ipv4",
-		"-f",
-		"'bestaudio[ext=m4a]",
-		"-o",
-		videoPath,
-		videoID,
-	}
-
-	cmd := exec.Command("youtube-dl", ytdlArgs...)
-	cmd.Stderr = os.Stderr
-
-	err := cmd.Run()
+	videoFullPath, err := ytdlExecute(videoTitle, videoID)
 	if err != nil {
-		return "", fmt.Errorf("Error while downloading %s: %v", videoPath, err)
+		return "", err
 	}
 
-	return videoPath, nil
+	return videoFullPath, nil
 }
 
-//DownloadVideo downloads video and returns video path.
-func DownloadVideo(videoTitle, videoID string) (string, error) {
-	videoPath := videoTitle + ".m4a"
-
-	if videoID == "" {
-		return "", fmt.Errorf("Couldn't find the video ID.")
-	}
+//ytdlExecute executes ytdl command on the OS with proper
+//arguments to download a video then returns downloaded
+//video file's path.
+func ytdlExecute(videoTitle, videoID string) (string, error) {
+	videoFullPath := util.GetVideoPath(videoTitle)
 
 	log.Printf("Starting to download: %s\n", videoTitle)
 
@@ -206,7 +189,7 @@ func DownloadVideo(videoTitle, videoID string) (string, error) {
 		"-f",
 		"'bestaudio[ext=m4a]",
 		"-o",
-		videoPath,
+		videoFullPath,
 		videoID,
 	}
 
@@ -217,8 +200,7 @@ func DownloadVideo(videoTitle, videoID string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("Error while downloading %s: %v", videoTitle, err)
 	}
-
-	return videoPath, nil
+	return videoFullPath, nil
 }
 
 //SearchDownload combines abilities of GetVideoID and
@@ -257,10 +239,10 @@ func (y *YoutubeAPI) GetInfoByID(id string) (*SearchResult, error) {
 		switch item.Kind {
 		case "youtube#video":
 			snippet := item.Snippet
-			newTitle := util.FormatVideoTitle(snippet.Title)
+			//newTitle := util.FormatVideoTitle(snippet.Title)
 			return &SearchResult{
 				VideoID:    item.Id,
-				VideoTitle: newTitle,
+				VideoTitle: snippet.Title,
 				Duration:   util.ParseISO8601(item.ContentDetails.Duration),
 				CoverUrl:   snippet.Thumbnails.High.Url,
 			}, nil
